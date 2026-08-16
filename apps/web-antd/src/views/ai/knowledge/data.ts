@@ -26,9 +26,11 @@ export function useFormSchema(): VbenFormSchema[] {
       componentProps: {
         placeholder: '请选择切分策略',
         options: [
+          { label: '语义切分 (Semantic)', value: 'Semantic' },
           { label: '父子切分 (ParentChild)', value: 'ParentChild' },
-          { label: '滑动窗口 (SlideWindow)', value: 'SlideWindow' },
-          { label: '句子切分 (Sentence)', value: 'Sentence' },
+          { label: '表格切分 (Table)', value: 'Table' },
+          { label: '问答切分 (FAQ)', value: 'FAQ' },
+          { label: '条款切分 (Policy)', value: 'Policy' },
         ],
       },
       defaultValue: 'ParentChild',
