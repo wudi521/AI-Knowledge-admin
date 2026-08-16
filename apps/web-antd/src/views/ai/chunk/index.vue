@@ -9,7 +9,7 @@ import { Page, confirm, useVbenModal } from '@vben/common-ui';
 import { Descriptions, Modal, Tag, message } from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getChunkPage, updateChunkStatus } from '#/api/ai/chunk';
+import { deleteChunk, getChunkPage, updateChunkStatus } from '#/api/ai/chunk';
 
 import {
   CHUNK_STATUS_TAG,
@@ -45,6 +45,24 @@ function handleEdit(row: AiChunkApi.Chunk) {
 /** 刷新列表 */
 function handleRefresh() {
   gridApi.query();
+}
+
+/** 下载文档(MinIO 直链) */
+function downloadDocument(row: AiChunkApi.Chunk) {
+  if (row.storagePath) {
+    window.open(row.storagePath, '_blank');
+  }
+}
+
+/** 删除片段(popConfirm 已确认) */
+async function handleDelete(row: AiChunkApi.Chunk) {
+  try {
+    await deleteChunk(row.id);
+    message.success('删除成功');
+    handleRefresh();
+  } catch {
+    message.error('删除失败');
+  }
 }
 
 /** 状态切换(PUBLISHED ↔ DISABLED) */
@@ -117,6 +135,16 @@ const [Grid, gridApi] = useVbenVxeGrid({
           {{ (row.chunkType && CHUNK_TYPE_TAG[row.chunkType]?.text) || row.chunkType }}
         </Tag>
       </template>
+      <template #documentId="{ row }">
+        <a
+          v-if="row.documentName"
+          class="text-blue-500 hover:underline"
+          @click="downloadDocument(row)"
+        >
+          {{ row.documentName }}
+        </a>
+        <span v-else>{{ row.documentId }}</span>
+      </template>
       <template #status="{ row }">
         <div class="flex items-center justify-center gap-2">
           <Tag
@@ -146,6 +174,15 @@ const [Grid, gridApi] = useVbenVxeGrid({
               type: 'link',
               icon: ACTION_ICON.EDIT,
               onClick: () => handleEdit(row),
+            },
+            {
+              label: '删除',
+              icon: ACTION_ICON.DELETE,
+              danger: true,
+              popConfirm: {
+                title: `确认删除片段 #${row.id} 吗？将同时删除向量与检索索引！`,
+                confirm: handleDelete.bind(null, row),
+              },
             },
           ]"
         />

@@ -6,6 +6,8 @@ export namespace AiChunkApi {
   export interface Chunk {
     id: number; // 片段编号
     documentId: number; // 文档编号(version_id 映射)
+    documentName?: string; // 文档名(联表)
+    storagePath?: string; // MinIO 下载路径(联表)
     chunkType: string; // 类型: SEMANTIC/TABLE/FAQ/POLICY
     content: string; // 片段内容
     parentId?: number; // 父块编号
@@ -33,4 +35,9 @@ export function updateChunk(data: { id: number; content: string }) {
 /** 启用/禁用片段 */
 export function updateChunkStatus(data: { id: number; status: string }) {
   return requestClient.put('/ingestion/chunk/update-status', data);
+}
+
+/** 删除片段(同时删除向量与检索索引) */
+export function deleteChunk(id: number) {
+  return requestClient.delete(`/ingestion/chunk/delete?id=${id}`);
 }

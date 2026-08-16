@@ -44,11 +44,14 @@ export function deleteKnowledgeBase(id: number) {
 export interface KnowledgeDocument {
   id?: number;
   kbId?: number;
+  kbName?: string; // 所属知识库名(联表)
   name?: string;
   type?: string;
   storagePath?: string;
   fileHash?: string;
   parseStatus?: string;
+  chunkStrategy?: string; // 切分策略(联表)
+  embedModel?: string; // Embedding 模型(联表)
   chunkCount?: number; // 片段数(解析结果)
   errorMsg?: string; // 失败原因
   owner?: string;

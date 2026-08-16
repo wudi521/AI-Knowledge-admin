@@ -90,6 +90,24 @@ async function handleDelete(row: KnowledgeDocument) {
   }
 }
 
+/** 下载文档(MinIO 直链) */
+function downloadDocument(row: KnowledgeDocument) {
+  if (row.storagePath) {
+    window.open(row.storagePath, '_blank');
+  } else {
+    message.warning('文档无存储路径');
+  }
+}
+
+/** 切分策略 → 中文 */
+const CHUNK_STRATEGY_TEXT: Record<string, string> = {
+  Semantic: '语义切分',
+  ParentChild: '父子切分',
+  Table: '表格切分',
+  FAQ: '问答切分',
+  Policy: '条款切分',
+};
+
 const STATUS_TAG: Record<string, { color: string; text: string }> = {
   PENDING: { color: 'default', text: '待解析' },
   PARSING: { color: 'processing', text: '解析中' },
@@ -141,8 +159,18 @@ const [Grid, gridApi] = useVbenVxeGrid({
           <Button type="primary" :icon="ACTION_ICON.UPLOAD">上传文档</Button>
         </Upload>
       </template>
+      <template #name="{ row }">
+        <a-tooltip title="点击下载">
+          <a class="text-blue-500 hover:underline" @click="downloadDocument(row)">
+            {{ row.name }}
+          </a>
+        </a-tooltip>
+      </template>
       <template #type="{ row }">
         <Tag>{{ row.type }}</Tag>
+      </template>
+      <template #chunkStrategy="{ row }">
+        <span>{{ CHUNK_STRATEGY_TEXT[row.chunkStrategy] || row.chunkStrategy || '-' }}</span>
       </template>
       <template #status="{ row }">
         <Tag :color="(row.parseStatus && STATUS_TAG[row.parseStatus]?.color) || 'default'">

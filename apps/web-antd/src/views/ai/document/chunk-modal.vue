@@ -9,7 +9,7 @@ import { confirm, useVbenModal } from '@vben/common-ui';
 import { Modal, Tag, message } from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getChunkPage, updateChunkStatus } from '#/api/ai/chunk';
+import { deleteChunk, getChunkPage, updateChunkStatus } from '#/api/ai/chunk';
 
 import ChunkEditForm from '../chunk/modules/edit-form.vue';
 
@@ -82,6 +82,18 @@ async function handleStatusChange(
 /** 刷新片段列表 */
 function handleRefresh() {
   gridApi.query();
+}
+
+/** 删除片段(popConfirm 已确认) */
+async function handleDelete(row: AiChunkApi.Chunk) {
+  try {
+    await deleteChunk(row.id);
+    message.success('删除成功');
+    handleRefresh();
+    emit('success');
+  } catch {
+    message.error('删除失败');
+  }
 }
 
 const [Grid, gridApi] = useVbenVxeGrid({
@@ -219,6 +231,15 @@ watch(
               type: 'link',
               icon: ACTION_ICON.EDIT,
               onClick: () => handleEdit(row),
+            },
+            {
+              label: '删除',
+              icon: ACTION_ICON.DELETE,
+              danger: true,
+              popConfirm: {
+                title: `确认删除片段 #${row.id} 吗？将同时删除向量与检索索引！`,
+                confirm: handleDelete.bind(null, row),
+              },
             },
           ]"
         />

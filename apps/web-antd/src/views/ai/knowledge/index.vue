@@ -14,7 +14,7 @@ import { Tag, message } from 'ant-design-vue';
 
 import { deleteKnowledgeBase, getKnowledgeBasePage } from '#/api/ai/knowledge';
 
-import { useGridColumns, useGridFormSchema } from './data';
+import { CHUNK_STRATEGY_TEXT, useGridColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
 
 const [FormModal, formModalApi] = useVbenModal({
@@ -95,6 +95,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
             },
           ]"
         />
+      </template>
+      <template #chunkStrategy="{ row }">
+        <span>{{ CHUNK_STRATEGY_TEXT[row.chunkStrategy] || row.chunkStrategy || '-' }}</span>
       </template>
       <template #status="{ row }">
         <Tag :color="row.status === 1 ? 'success' : 'default'">

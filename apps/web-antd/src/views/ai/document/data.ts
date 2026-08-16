@@ -56,6 +56,25 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       title: '文档名',
       minWidth: 220,
       showOverflow: true,
+      slots: { default: 'name' },
+    },
+    {
+      field: 'kbName',
+      title: '所属知识库',
+      width: 140,
+      showOverflow: true,
+    },
+    {
+      field: 'chunkStrategy',
+      title: '切分策略',
+      width: 120,
+      slots: { default: 'chunkStrategy' },
+    },
+    {
+      field: 'embedModel',
+      title: 'Embedding 模型',
+      width: 120,
+      showOverflow: true,
     },
     {
       field: 'type',
@@ -85,6 +104,7 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       field: 'createTime',
       title: '上传时间',
       width: 170,
+      formatter: 'formatDateTime',
     },
     {
       field: 'operation',

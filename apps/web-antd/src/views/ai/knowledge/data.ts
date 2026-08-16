@@ -1,6 +1,15 @@
 import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 
+/** 切分策略 → 中文 */
+export const CHUNK_STRATEGY_TEXT: Record<string, string> = {
+  Semantic: '语义切分',
+  ParentChild: '父子切分',
+  Table: '表格切分',
+  FAQ: '问答切分',
+  Policy: '条款切分',
+};
+
 /** 新增/编辑 表单 */
 export function useFormSchema(): VbenFormSchema[] {
   return [
@@ -105,6 +114,7 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       field: 'chunkStrategy',
       title: '切分策略',
       minWidth: 130,
+      slots: { default: 'chunkStrategy' },
     },
     {
       field: 'embedModel',
@@ -127,6 +137,7 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       field: 'createTime',
       title: '创建时间',
       width: 170,
+      formatter: 'formatDateTime',
     },
     {
       field: 'operation',

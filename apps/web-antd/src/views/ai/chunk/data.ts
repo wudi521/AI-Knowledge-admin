@@ -86,7 +86,9 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
     {
       field: 'documentId',
       title: '所属文档',
-      width: 110,
+      width: 160,
+      showOverflow: true,
+      slots: { default: 'documentId' },
     },
     {
       field: 'status',
