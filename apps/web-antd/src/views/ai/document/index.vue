@@ -4,6 +4,8 @@ import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 
 import type { KnowledgeDocument } from '#/api/ai/knowledge';
 
+import { ref } from 'vue';
+
 import { Page, confirm } from '@vben/common-ui';
 
 import { Button, Tag, Upload, message } from 'ant-design-vue';
@@ -17,7 +19,18 @@ import {
 } from '#/api/ai/knowledge';
 import { uploadFile } from '#/api/infra/file';
 
+import ChunkModal from './chunk-modal.vue';
 import { useGridColumns, useGridFormSchema } from './data';
+
+/** 片段管理弹窗状态 */
+const chunkModalOpen = ref(false);
+const currentDocumentId = ref<number>();
+
+/** 打开片段管理弹窗 */
+function openChunkModal(row: KnowledgeDocument) {
+  currentDocumentId.value = row.id;
+  chunkModalOpen.value = true;
+}
 
 function handleRefresh() {
   gridApi.query();
@@ -141,7 +154,13 @@ const [Grid, gridApi] = useVbenVxeGrid({
         </a-tooltip>
       </template>
       <template #chunkCount="{ row }">
-        <span v-if="row.parseStatus === 'INDEXED'">{{ row.chunkCount ?? '-' }}</span>
+        <a
+          v-if="row.parseStatus === 'INDEXED'"
+          class="text-blue-500 hover:underline"
+          @click="openChunkModal(row)"
+        >
+          {{ row.chunkCount ?? 0 }}
+        </a>
         <span v-else class="text-gray-400">-</span>
       </template>
       <template #operation="{ row }">
@@ -156,5 +175,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
         />
       </template>
     </Grid>
+    <ChunkModal
+      v-model:open="chunkModalOpen"
+      :document-id="currentDocumentId"
+      @success="handleRefresh"
+    />
   </Page>
 </template>
