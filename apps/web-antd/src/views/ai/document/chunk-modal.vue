@@ -190,6 +190,7 @@ watch(
     width="90%"
     :footer="null"
     :z-index="1000"
+    :destroy-on-close="true"
     @after-open-change="handleAfterOpenChange"
   >
     <Grid>

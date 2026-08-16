@@ -152,7 +152,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
       </template>
     </Grid>
 
-    <Modal v-model:open="detailOpen" title="片段详情" width="680px" :footer="null" :z-index="1000">
+    <Modal v-model:open="detailOpen" title="片段详情" width="680px" :footer="null" :z-index="1000" :destroy-on-close="true">
       <template v-if="detailRow">
         <div class="mb-4">
           <div class="mb-2 text-sm font-bold text-gray-600">片段内容：</div>
