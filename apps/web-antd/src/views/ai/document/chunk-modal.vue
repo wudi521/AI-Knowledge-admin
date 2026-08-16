@@ -142,7 +142,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
       },
       {
         title: '操作',
-        width: 90,
+        width: 180,
         fixed: 'right',
         slots: { default: 'operation' },
       },
