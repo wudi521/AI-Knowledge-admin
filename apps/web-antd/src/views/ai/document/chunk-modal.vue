@@ -11,7 +11,7 @@ import { Modal, Tag, message } from 'ant-design-vue';
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getChunkPage, updateChunkStatus } from '#/api/ai/chunk';
 
-import ChunkEditForm from './modules/chunk-edit-form.vue';
+import ChunkEditForm from '../chunk/modules/edit-form.vue';
 
 defineOptions({ name: 'AiDocumentChunkModal' });
 
@@ -67,9 +67,14 @@ async function handleStatusChange(
   } catch {
     return false;
   }
-  await updateChunkStatus({ id: row.id, status: newStatus });
-  message.success('操作成功');
-  return true;
+  try {
+    await updateChunkStatus({ id: row.id, status: newStatus });
+    message.success('操作成功');
+    return true;
+  } catch {
+    message.error('操作失败');
+    return false;
+  }
 }
 
 /** 刷新片段列表 */
