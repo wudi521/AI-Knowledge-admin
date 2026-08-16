@@ -41,3 +41,8 @@ export function updateChunkStatus(data: { id: number; status: string }) {
 export function deleteChunk(id: number) {
   return requestClient.delete(`/ingestion/chunk/delete?id=${id}`);
 }
+
+/** 批量删除片段(三处联动) */
+export function deleteChunkBatch(ids: number[]) {
+  return requestClient.delete(`/ingestion/chunk/delete-batch?ids=${ids.join(',')}`);
+}

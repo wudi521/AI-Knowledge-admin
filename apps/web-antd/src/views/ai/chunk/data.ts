@@ -61,6 +61,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
 /** 列表的字段 */
 export function useGridColumns(): VxeTableGridOptions['columns'] {
   return [
+    { type: 'checkbox', width: 50 },
     {
       field: 'id',
       title: 'Chunk ID',

@@ -9,7 +9,12 @@ import { Page, confirm, useVbenModal } from '@vben/common-ui';
 import { Descriptions, Modal, Tag, message } from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
-import { deleteChunk, getChunkPage, updateChunkStatus } from '#/api/ai/chunk';
+import {
+  deleteChunk,
+  deleteChunkBatch,
+  getChunkPage,
+  updateChunkStatus,
+} from '#/api/ai/chunk';
 
 import {
   CHUNK_STATUS_TAG,
@@ -65,6 +70,30 @@ async function handleDelete(row: AiChunkApi.Chunk) {
   }
 }
 
+// 选中行
+const selectedRows = ref<AiChunkApi.Chunk[]>([]);
+/** checkbox 变化 */
+function handleCheckboxChange() {
+  selectedRows.value = gridApi.grid.getCheckboxRecords() as AiChunkApi.Chunk[];
+}
+
+/** 批量删除选中片段 */
+async function handleBatchDelete() {
+  if (selectedRows.value.length === 0) {
+    message.warning('请先勾选要删除的片段');
+    return;
+  }
+  try {
+    await deleteChunkBatch(selectedRows.value.map((r) => r.id));
+    message.success(`已删除 ${selectedRows.value.length} 个片段`);
+    selectedRows.value = [];
+    gridApi.grid.clearCheckboxRow?.();
+    handleRefresh();
+  } catch {
+    message.error('批量删除失败');
+  }
+}
+
 /** 状态切换(PUBLISHED ↔ DISABLED) */
 async function handleStatusChange(checked: boolean, row: AiChunkApi.Chunk) {
   const newStatus = checked ? 'PUBLISHED' : 'DISABLED';
@@ -115,6 +144,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
       search: true,
     },
   } as VxeTableGridOptions<AiChunkApi.Chunk>,
+  gridEvents: {
+    checkboxChange: handleCheckboxChange,
+    checkboxAll: handleCheckboxChange,
+  },
 });
 </script>
 
@@ -122,6 +155,21 @@ const [Grid, gridApi] = useVbenVxeGrid({
   <Page auto-content-height>
     <EditModal @success="handleRefresh" />
     <Grid table-title="AI 片段管理">
+      <template #toolbar-tools>
+        <TableAction
+          :actions="[
+            {
+              label: '批量删除',
+              icon: ACTION_ICON.DELETE,
+              danger: true,
+              popConfirm: {
+                title: `确认删除选中的 ${selectedRows.length} 个片段吗？将同时删除向量与检索索引！`,
+                confirm: handleBatchDelete,
+              },
+            },
+          ]"
+        />
+      </template>
       <template #expand_content="{ row }">
         <div class="whitespace-pre-wrap border-l-4 border-blue-500 px-2.5 py-5 leading-5">
           <div class="mb-2 text-sm font-bold text-muted-foreground">完整内容：</div>
