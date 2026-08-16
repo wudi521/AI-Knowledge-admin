@@ -6,7 +6,7 @@ import type { KnowledgeDocument } from '#/api/ai/knowledge';
 
 import { ref } from 'vue';
 
-import { Page, confirm } from '@vben/common-ui';
+import { Page } from '@vben/common-ui';
 
 import { Button, Tag, Upload, message } from 'ant-design-vue';
 
@@ -79,15 +79,14 @@ async function handleUploadFile(file: File) {
   return false;
 }
 
-/** 删除文档 */
+/** 删除文档(popConfirm 已确认) */
 async function handleDelete(row: KnowledgeDocument) {
-  await confirm(`确认删除文档「${row.name}」吗？`);
   try {
     await deleteDocument(row.id!);
     message.success('删除成功');
     handleRefresh();
   } catch {
-    // 取消或失败
+    message.error('删除失败');
   }
 }
 
@@ -169,7 +168,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
             {
               label: '删除',
               icon: ACTION_ICON.DELETE,
-              onClick: () => handleDelete(row),
+              danger: true,
+              popConfirm: {
+                title: `确认删除文档「${row.name}」吗？将同时删除其全部 AI 片段！`,
+                confirm: handleDelete.bind(null, row),
+              },
             },
           ]"
         />
