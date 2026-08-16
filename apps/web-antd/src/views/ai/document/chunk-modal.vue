@@ -48,6 +48,8 @@ const CHUNK_TYPE_TAG: Record<string, { color: string; text: string }> = {
 const [EditModal, editModalApi] = useVbenModal({
   connectedComponent: ChunkEditForm,
   destroyOnClose: true,
+  // 显式高于外层 antd Modal(默认 z-index 1000), 避免编辑弹窗被片段管理弹窗遮挡
+  zIndex: 2000,
 });
 
 /** 打开编辑 */
@@ -187,6 +189,7 @@ watch(
     :title="`片段管理${props.documentId ? ` · 文档 #${props.documentId}` : ''}`"
     width="90%"
     :footer="null"
+    :z-index="1000"
     @after-open-change="handleAfterOpenChange"
   >
     <Grid>

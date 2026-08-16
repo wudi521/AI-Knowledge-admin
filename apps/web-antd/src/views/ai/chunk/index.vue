@@ -33,6 +33,8 @@ function handleView(row: AiChunkApi.Chunk) {
 const [EditModal, editModalApi] = useVbenModal({
   connectedComponent: EditForm,
   destroyOnClose: true,
+  // 显式高于同页详情 antd Modal(默认 z-index 1000), 避免编辑弹窗被详情弹窗遮挡
+  zIndex: 2000,
 });
 
 /** 打开编辑 */
@@ -150,7 +152,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
       </template>
     </Grid>
 
-    <Modal v-model:open="detailOpen" title="片段详情" width="680px" :footer="null">
+    <Modal v-model:open="detailOpen" title="片段详情" width="680px" :footer="null" :z-index="1000">
       <template v-if="detailRow">
         <div class="mb-4">
           <div class="mb-2 text-sm font-bold text-gray-600">片段内容：</div>
