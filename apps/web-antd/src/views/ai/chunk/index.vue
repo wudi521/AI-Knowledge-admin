@@ -106,7 +106,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     <Grid table-title="AI 片段管理">
       <template #expand_content="{ row }">
         <div class="whitespace-pre-wrap border-l-4 border-blue-500 px-2.5 py-5 leading-5">
-          <div class="mb-2 text-sm font-bold text-gray-600">完整内容：</div>
+          <div class="mb-2 text-sm font-bold text-muted-foreground">完整内容：</div>
           {{ row.content }}
         </div>
       </template>
@@ -155,9 +155,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
     <Modal v-model:open="detailOpen" title="片段详情" width="680px" :footer="null" :z-index="1000" :destroy-on-close="true">
       <template v-if="detailRow">
         <div class="mb-4">
-          <div class="mb-2 text-sm font-bold text-gray-600">片段内容：</div>
+          <div class="mb-2 text-sm font-bold text-muted-foreground">片段内容：</div>
           <div
-            class="max-h-60 overflow-auto whitespace-pre-wrap rounded bg-gray-50 p-3 leading-6"
+            class="max-h-60 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 leading-6"
           >
             {{ detailRow.content }}
           </div>

@@ -161,7 +161,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
         >
           {{ row.chunkCount ?? 0 }}
         </a>
-        <span v-else class="text-gray-400">-</span>
+        <span v-else class="text-muted-foreground">-</span>
       </template>
       <template #operation="{ row }">
         <TableAction
