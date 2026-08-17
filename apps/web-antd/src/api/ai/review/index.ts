@@ -57,3 +57,10 @@ export function rejectReviewItem(id: number, reason: string) {
     params: { id, reason },
   });
 }
+
+/** 按文档重试 LLM 抽取(抽取失败后的恢复入口) */
+export function retryExtractByDocId(docId: number) {
+  return requestClient.post('/knowledge/review-item/retry-extract', {
+    params: { docId },
+  });
+}

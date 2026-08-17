@@ -20,6 +20,7 @@ import {
   deleteDocument,
   getDocumentPage,
 } from '#/api/ai/knowledge';
+import { retryExtractByDocId } from '#/api/ai/review';
 import { uploadFile } from '#/api/infra/file';
 
 import ChunkModal from './chunk-modal.vue';
@@ -127,7 +128,7 @@ function goReview(row: KnowledgeDocument) {
   router.push({ path: '/ai/review', query: { docId: row.id, status: 'PENDING' } });
 }
 
-/** 操作列(审核中显示"去审核") */
+/** 操作列(审核中显示"去审核"; 失败/审核中可重试抽取) */
 function buildActions(row: KnowledgeDocument): ActionItem[] {
   const actions: ActionItem[] = [];
   if (row.parseStatus === 'REVIEW') {
@@ -136,6 +137,14 @@ function buildActions(row: KnowledgeDocument): ActionItem[] {
       type: 'link',
       icon: ACTION_ICON.AUDIT,
       onClick: () => goReview(row),
+    });
+  }
+  if (row.parseStatus === 'FAILED' || row.parseStatus === 'REVIEW') {
+    actions.push({
+      label: '重试抽取',
+      type: 'link',
+      icon: ACTION_ICON.REFRESH,
+      onClick: () => handleRetryExtract(row),
     });
   }
   actions.push({
@@ -148,6 +157,17 @@ function buildActions(row: KnowledgeDocument): ActionItem[] {
     },
   });
   return actions;
+}
+
+/** 重试 LLM 抽取(抽取失败恢复) */
+async function handleRetryExtract(row: KnowledgeDocument) {
+  try {
+    await retryExtractByDocId(row.id!);
+    message.success('已重新抽取, 请稍后刷新查看');
+    handleRefresh();
+  } catch {
+    message.error('重试抽取失败(请确认模型服务正常)');
+  }
 }
 
 const [Grid, gridApi] = useVbenVxeGrid({
