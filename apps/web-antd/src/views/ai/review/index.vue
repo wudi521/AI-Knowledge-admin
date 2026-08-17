@@ -14,7 +14,6 @@ import { Modal, Tag, message } from 'ant-design-vue';
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
   approveReviewItem,
-  approveReviewItemSecond,
   getReviewItemPage,
   rejectReviewItem,
 } from '#/api/ai/review';
@@ -79,17 +78,6 @@ async function handleApprove(row: AiReviewApi.ReviewItem) {
     gridApi.query();
   } catch {
     message.error('操作失败');
-  }
-}
-
-/** 价格双人复核 */
-async function handleApproveSecond(row: AiReviewApi.ReviewItem) {
-  try {
-    await approveReviewItemSecond(row.id);
-    message.success('双人复核完成');
-    gridApi.query();
-  } catch {
-    message.error('操作失败(需由不同审核人复核)');
   }
 }
 
@@ -217,7 +205,7 @@ const gridOptions: VxeTableGridOptions<AiReviewApi.ReviewItem> = {
   },
 };
 
-/** 操作列(通过/驳回/双人复核) */
+/** 操作列(通过/驳回) */
 function buildActions(row: AiReviewApi.ReviewItem): ActionItem[] {
   const actions: ActionItem[] = [];
   if (row.status === 'PENDING') {
@@ -233,14 +221,6 @@ function buildActions(row: AiReviewApi.ReviewItem): ActionItem[] {
       danger: true,
       icon: ACTION_ICON.CLOSE,
       onClick: () => openReject(row),
-    });
-  }
-  if (row.itemType === 'PRICE' && row.status === 'APPROVED' && !row.reviewer2) {
-    actions.push({
-      label: '双人复核',
-      type: 'link',
-      icon: ACTION_ICON.AUDIT,
-      onClick: () => handleApproveSecond(row),
     });
   }
   return actions;

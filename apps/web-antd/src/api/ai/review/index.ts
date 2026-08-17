@@ -17,7 +17,6 @@ export namespace AiReviewApi {
     mustReview: boolean; // 是否必审
     status: string; // PENDING/APPROVED/REJECTED
     reviewer?: string; // 审核人
-    reviewer2?: string; // 双人复核第二人
     rejectReason?: string; // 驳回原因
     reviewTime?: string; // 审核时间
   }
@@ -42,11 +41,6 @@ export function getReviewItemPage(
 /** 通过条目 */
 export function approveReviewItem(id: number) {
   return requestClient.post(`/knowledge/review-item/approve?id=${id}`);
-}
-
-/** 价格类双人复核 */
-export function approveReviewItemSecond(id: number) {
-  return requestClient.post(`/knowledge/review-item/approve-second?id=${id}`);
 }
 
 /** 驳回条目 */
