@@ -39,6 +39,10 @@ const [Modal, modalApi] = useVbenModal({
     modalApi.lock();
     try {
       const data = await formApi.getValues();
+      // 可见角色: 数组 join 为逗号分隔字符串(后端 varchar 存储)
+      if (Array.isArray(data.visibleRoles)) {
+        data.visibleRoles = data.visibleRoles.join(',');
+      }
       if (data.id) {
         await updateKnowledgeBase(data);
       } else {
@@ -69,7 +73,14 @@ const [Modal, modalApi] = useVbenModal({
     } catch {
       // 模型网关未启动时忽略, 保留静态选项
     }
-    const row = modalApi.getData<{ id?: number }>();
+    const row = modalApi.getData<Recordable>();
+    // 可见角色: 后端存逗号分隔字符串, 表单用数组(多选) -> 回显时拆分
+    if (row && typeof row.visibleRoles === 'string' && row.visibleRoles) {
+      row.visibleRoles = row.visibleRoles
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter(Boolean);
+    }
     formApi.setValues(row ?? {});
   },
   onClosed() {

@@ -1,6 +1,8 @@
 import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 
+import { requestClient } from '#/api/request';
+
 /** 切分策略 → 中文 */
 export const CHUNK_STRATEGY_TEXT: Record<string, string> = {
   Semantic: '语义切分',
@@ -70,6 +72,31 @@ export function useFormSchema(): VbenFormSchema[] {
       defaultValue: 1,
     },
     {
+      fieldName: 'visibleRoles',
+      label: '可见角色',
+      component: 'ApiSelect',
+      componentProps: {
+        multiple: true,
+        mode: 'multiple',
+        api: () => requestClient.get('/system/role/list-all-simple'),
+        labelField: 'name',
+        valueField: 'code',
+        placeholder: '选择可见角色(空=全部可见)',
+        allowClear: true,
+      },
+      // 前端为数组, 提交前在 form.vue join 为逗号分隔字符串; 回显时 split
+    },
+    {
+      fieldName: 'effectiveTo',
+      label: '有效期至',
+      component: 'DatePicker',
+      componentProps: {
+        placeholder: '选择有效期(空=永久有效)',
+        valueFormat: 'YYYY-MM-DD HH:mm:ss',
+        showTime: true,
+      },
+    },
+    {
       fieldName: 'remark',
       label: '备注',
       component: 'Textarea',
@@ -132,6 +159,18 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       title: '备注',
       minWidth: 160,
       showOverflow: true,
+    },
+    {
+      field: 'visibleRoles',
+      title: '可见角色',
+      minWidth: 150,
+      showOverflow: true,
+    },
+    {
+      field: 'effectiveTo',
+      title: '有效期至',
+      width: 170,
+      formatter: 'formatDateTime',
     },
     {
       field: 'createTime',
