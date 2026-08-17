@@ -29,14 +29,10 @@ export function getConflictList(docId: number, status?: string) {
 
 /** 触发冲突检测 */
 export function detectConflicts(versionId: number) {
-  return requestClient.post('/knowledge/conflict/detect', {
-    params: { versionId },
-  });
+  return requestClient.post(`/knowledge/conflict/detect?versionId=${versionId}`);
 }
 
 /** 裁决 */
 export function resolveConflict(id: number, resolveType: string, comment?: string) {
-  return requestClient.post('/knowledge/conflict/resolve', {
-    params: { id, resolveType, comment },
-  });
+  return requestClient.post(`/knowledge/conflict/resolve?id=${id}&resolveType=${resolveType}&comment=${encodeURIComponent(comment ?? '')}`);
 }

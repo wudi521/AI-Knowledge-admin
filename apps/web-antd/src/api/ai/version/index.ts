@@ -25,12 +25,10 @@ export function getVersionList(docId: number) {
 
 /** 发布版本 */
 export function publishVersion(id: number) {
-  return requestClient.post('/knowledge/version/publish', { params: { id } });
+  return requestClient.post(`/knowledge/version/publish?id=${id}`);
 }
 
 /** 整体驳回版本 */
 export function rejectVersion(id: number, comment: string) {
-  return requestClient.post('/knowledge/version/reject', {
-    params: { id, comment },
-  });
+  return requestClient.post(`/knowledge/version/reject?id=${id}&comment=${encodeURIComponent(comment)}`);
 }

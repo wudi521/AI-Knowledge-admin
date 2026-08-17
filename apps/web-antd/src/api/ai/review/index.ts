@@ -41,26 +41,20 @@ export function getReviewItemPage(
 
 /** 通过条目 */
 export function approveReviewItem(id: number) {
-  return requestClient.post('/knowledge/review-item/approve', { params: { id } });
+  return requestClient.post(`/knowledge/review-item/approve?id=${id}`);
 }
 
 /** 价格类双人复核 */
 export function approveReviewItemSecond(id: number) {
-  return requestClient.post('/knowledge/review-item/approve-second', {
-    params: { id },
-  });
+  return requestClient.post(`/knowledge/review-item/approve-second?id=${id}`);
 }
 
 /** 驳回条目 */
 export function rejectReviewItem(id: number, reason: string) {
-  return requestClient.post('/knowledge/review-item/reject', {
-    params: { id, reason },
-  });
+  return requestClient.post(`/knowledge/review-item/reject?id=${id}&reason=${encodeURIComponent(reason)}`);
 }
 
 /** 按文档重试 LLM 抽取(抽取失败后的恢复入口) */
 export function retryExtractByDocId(docId: number) {
-  return requestClient.post('/knowledge/review-item/retry-extract', {
-    params: { docId },
-  });
+  return requestClient.post(`/knowledge/review-item/retry-extract?docId=${docId}`);
 }
