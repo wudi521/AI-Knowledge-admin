@@ -6,11 +6,14 @@ import type { KnowledgeDocument } from '#/api/ai/knowledge';
 
 import { ref } from 'vue';
 
+import { useRouter } from 'vue-router';
+
 import { Page } from '@vben/common-ui';
 
 import { Button, Tag, Upload, message } from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
+import type { ActionItem } from '#/adapter/vxe-table';
 
 import {
   createDocument,
@@ -112,9 +115,40 @@ const STATUS_TAG: Record<string, { color: string; text: string }> = {
   PENDING: { color: 'default', text: '待解析' },
   PARSING: { color: 'processing', text: '解析中' },
   EMBEDDING: { color: 'warning', text: '向量化中' },
+  REVIEW: { color: 'blue', text: '审核中' },
   INDEXED: { color: 'success', text: '已入库' },
+  PUBLISHED: { color: 'success', text: '已发布' },
   FAILED: { color: 'error', text: '失败' },
 };
+
+/** 去审核(跳转审核台并按文档过滤) */
+const router = useRouter();
+function goReview(row: KnowledgeDocument) {
+  router.push({ path: '/ai/review', query: { docId: row.id, status: 'PENDING' } });
+}
+
+/** 操作列(审核中显示"去审核") */
+function buildActions(row: KnowledgeDocument): ActionItem[] {
+  const actions: ActionItem[] = [];
+  if (row.parseStatus === 'REVIEW') {
+    actions.push({
+      label: '去审核',
+      type: 'link',
+      icon: ACTION_ICON.AUDIT,
+      onClick: () => goReview(row),
+    });
+  }
+  actions.push({
+    label: '删除',
+    icon: ACTION_ICON.DELETE,
+    danger: true,
+    popConfirm: {
+      title: `确认删除文档「${row.name}」吗？将同时删除其全部 AI 片段！`,
+      confirm: () => handleDelete(row),
+    },
+  });
+  return actions;
+}
 
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: {
@@ -182,7 +216,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
       </template>
       <template #chunkCount="{ row }">
         <a
-          v-if="row.parseStatus === 'INDEXED'"
+          v-if="row.parseStatus === 'INDEXED' || row.parseStatus === 'PUBLISHED'"
           class="text-blue-500 hover:underline"
           @click="openChunkModal(row)"
         >
@@ -190,20 +224,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
         </a>
         <span v-else class="text-muted-foreground">-</span>
       </template>
+      <template #versionNo="{ row }">
+        <span>{{ row.versionNo || '-' }}</span>
+      </template>
       <template #operation="{ row }">
-        <TableAction
-          :actions="[
-            {
-              label: '删除',
-              icon: ACTION_ICON.DELETE,
-              danger: true,
-              popConfirm: {
-                title: `确认删除文档「${row.name}」吗？将同时删除其全部 AI 片段！`,
-                confirm: handleDelete.bind(null, row),
-              },
-            },
-          ]"
-        />
+        <TableAction :actions="buildActions(row)" />
       </template>
     </Grid>
     <ChunkModal

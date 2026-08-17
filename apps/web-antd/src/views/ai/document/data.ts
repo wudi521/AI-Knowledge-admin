@@ -39,7 +39,9 @@ export function useGridFormSchema(): VbenFormSchema[] {
           { label: '待解析', value: 'PENDING' },
           { label: '解析中', value: 'PARSING' },
           { label: '向量化中', value: 'EMBEDDING' },
+          { label: '审核中', value: 'REVIEW' },
           { label: '已入库', value: 'INDEXED' },
+          { label: '已发布', value: 'PUBLISHED' },
           { label: '失败', value: 'FAILED' },
         ],
       },
@@ -87,6 +89,12 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       title: '解析状态',
       width: 130,
       slots: { default: 'status' },
+    },
+    {
+      field: 'versionNo',
+      title: '当前版本',
+      width: 100,
+      slots: { default: 'versionNo' },
     },
     {
       field: 'chunkCount',
