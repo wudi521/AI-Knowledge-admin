@@ -73,7 +73,7 @@ const [Modal, modalApi] = useVbenModal({
     } catch {
       // 模型网关未启动时忽略, 保留静态选项
     }
-    const row = modalApi.getData<Recordable>();
+    const row = modalApi.getData<Record<string, any>>();
     // 可见角色: 后端存逗号分隔字符串, 表单用数组(多选) -> 回显时拆分
     if (row && typeof row.visibleRoles === 'string' && row.visibleRoles) {
       row.visibleRoles = row.visibleRoles
