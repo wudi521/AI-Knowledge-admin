@@ -27,6 +27,7 @@ export namespace AiRetrievalApi {
     query: string;
     analysis?: Analysis;
     channels?: ChannelStat;
+    answer?: string;
     results: ResultItem[];
   }
 }

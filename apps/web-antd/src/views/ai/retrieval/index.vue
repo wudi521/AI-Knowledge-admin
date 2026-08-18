@@ -132,6 +132,16 @@ function highlightHtml(text?: string, keyword?: string): string {
 function formatScore(score?: number): string {
   return score == null ? '-' : score.toFixed(2);
 }
+
+/** AI 总结渲染: 先转义, 再把 [C1][C2] 引用编号美化(防 XSS) */
+function renderAnswer(answer?: string): string {
+  const safe = escapeHtml(answer || '');
+  return safe.replace(
+    /\[C(\d+)\]/g,
+    (_m, num: string) =>
+      `<span class="mx-0.5 rounded bg-blue-500/15 px-1 py-0.5 text-xs font-semibold text-blue-600 dark:text-blue-400">[C${num}]</span>`,
+  );
+}
 </script>
 
 <template>
@@ -207,6 +217,21 @@ function formatScore(score?: number): string {
           语义分析未成功, 已直接走关键词检索
         </div>
       </div>
+
+      <!-- AI 总结 -->
+      <Card v-if="result?.answer" size="small" class="border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/20">
+        <div class="mb-1 flex items-center gap-2">
+          <span class="text-sm font-bold">AI 总结</span>
+          <Tag color="blue">基于检索结果生成</Tag>
+        </div>
+        <div
+          class="whitespace-pre-wrap leading-6 text-card-foreground"
+          v-html="renderAnswer(result.answer)"
+        />
+        <div class="mt-1 text-xs text-muted-foreground">
+          引用编号 [C1][C2]… 对应下方结果卡片顺序
+        </div>
+      </Card>
 
       <!-- 结果区 -->
       <template v-if="result">
