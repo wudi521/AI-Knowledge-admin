@@ -10,9 +10,13 @@ import {
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 
+import { useRouter } from 'vue-router';
+
 import { Tag, message } from 'ant-design-vue';
 
 import { deleteKnowledgeBase, getKnowledgeBasePage } from '#/api/ai/knowledge';
+
+const router = useRouter();
 
 import { CHUNK_STRATEGY_TEXT, useGridColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
@@ -111,6 +115,15 @@ const [Grid, gridApi] = useVbenVxeGrid({
               label: '编辑',
               icon: ACTION_ICON.EDIT,
               onClick: () => handleEdit(row),
+            },
+            {
+              label: '检索测试',
+              icon: ACTION_ICON.SEARCH,
+              onClick: () =>
+                router.push({
+                  path: '/ai/retrieval',
+                  query: { kbId: row.id },
+                }),
             },
             {
               label: '删除',
