@@ -18,6 +18,7 @@ import type { ActionItem } from '#/adapter/vxe-table';
 import {
   createDocument,
   deleteDocument,
+  getDocument,
   getDocumentPage,
 } from '#/api/ai/knowledge';
 import { retryExtractByDocId } from '#/api/ai/review';
@@ -80,7 +81,7 @@ async function handleUploadFile(file: File) {
     const url = (await uploadFile({ file, directory: 'kb-docs' } as any)) as unknown as string;
     // 计算文件指纹(重复文档拦截, BR-002)
     const fileHash = await calcFileHash(file);
-    await createDocument({
+    const newDocId = await createDocument({
       kbId,
       name: file.name,
       type: getDocType(file.name),
@@ -88,7 +89,9 @@ async function handleUploadFile(file: File) {
       fileHash,
     });
     message.success({ content: `「${file.name}」已登记入库(待解析)`, key: 'upload' });
+    // 全量刷新一次以显示新行, 之后只对该行做原位状态轮询(不整页刷新)
     handleRefresh();
+    pollRowStatus(newDocId);
   } catch (e: any) {
     const msg = e?.message || '上传失败';
     message.error({ content: `「${file.name}」${msg}`, key: 'upload' });
@@ -184,23 +187,44 @@ async function handleRetryExtract(row: KnowledgeDocument) {
   }
 }
 
-/** 状态异步刷新: 有处理中/待审核文档时每 10s 自动刷新列表 */
-const BUSY_STATUS = ['PENDING', 'PARSING', 'EMBEDDING', 'EXTRACTING', 'REVIEW'];
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+/** 已加载行缓存(供单行状态原位刷新, 不整页重查) */
+const rowsById = new Map<number, KnowledgeDocument>();
+let rowPollTimer: ReturnType<typeof setInterval> | null = null;
 
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
-  }
+/** 单行状态轮询: 只更新该行字段(grid keepSource 原位生效), 终态后停止 */
+function pollRowStatus(docId: number) {
+  stopRowPolling();
+  let ticks = 0;
+  rowPollTimer = setInterval(async () => {
+    ticks += 1;
+    try {
+      const doc = await getDocument(docId);
+      const row = rowsById.get(docId);
+      if (!doc || !row) {
+        stopRowPolling();
+        return;
+      }
+      row.parseStatus = doc.parseStatus;
+      row.chunkCount = doc.chunkCount;
+      row.errorMsg = doc.errorMsg;
+      row.versionNo = doc.versionNo;
+      row.versionStatus = doc.versionStatus;
+      if (
+        ticks > 60 ||
+        ['PUBLISHED', 'FAILED', 'INDEXED'].includes(doc.parseStatus)
+      ) {
+        stopRowPolling();
+      }
+    } catch {
+      stopRowPolling();
+    }
+  }, 10000);
 }
 
-function startPollingIfBusy(list: KnowledgeDocument[]) {
-  const busy = list.some((d) => d.parseStatus && BUSY_STATUS.includes(d.parseStatus));
-  if (busy && !pollTimer) {
-    pollTimer = setInterval(() => gridApi.query(), 10000);
-  } else if (!busy) {
-    stopPolling();
+function stopRowPolling() {
+  if (rowPollTimer) {
+    clearInterval(rowPollTimer);
+    rowPollTimer = null;
   }
 }
 
@@ -220,7 +244,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
             pageSize: page.pageSize,
             ...formValues,
           });
-          startPollingIfBusy(data.list ?? []);
+          // 记录已加载行, 供上传后单行原位刷新
+          for (const d of data.list ?? []) {
+            rowsById.set(d.id!, d);
+          }
           return data;
         },
       },
@@ -236,7 +263,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
   } as VxeTableGridOptions<KnowledgeDocument>,
 });
 
-onBeforeUnmount(() => stopPolling());
+onBeforeUnmount(() => stopRowPolling());
 </script>
 
 <template>

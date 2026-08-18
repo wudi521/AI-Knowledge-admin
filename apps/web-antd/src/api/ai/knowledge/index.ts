@@ -54,6 +54,8 @@ export interface KnowledgeDocument {
   embedModel?: string; // Embedding 模型(联表)
   chunkCount?: number; // 片段数(解析结果)
   errorMsg?: string; // 失败原因
+  versionNo?: string; // 当前版本号(联表)
+  versionStatus?: string; // 当前版本状态(联表)
   owner?: string;
   createTime?: string;
 }
@@ -68,9 +70,14 @@ export function getDocumentPage(
   );
 }
 
-/** 创建文档(上传后登记) */
+/** 创建文档(上传后登记, 返回文档编号) */
 export function createDocument(data: Partial<KnowledgeDocument>) {
-  return requestClient.post('/knowledge/document/create', data);
+  return requestClient.post<number>('/knowledge/document/create', data);
+}
+
+/** 获得文档详情(单行状态轮询用) */
+export function getDocument(id: number) {
+  return requestClient.get<KnowledgeDocument>(`/knowledge/document/get?id=${id}`);
 }
 
 /** 删除文档 */
