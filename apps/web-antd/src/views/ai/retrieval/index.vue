@@ -32,13 +32,10 @@ const kbIds = ref<number[]>([]); // 选中的知识库(空 = 全部可见)
 const loading = ref(false);
 const result = ref<AiRetrievalApi.SearchResp | null>(null);
 
-/** 证据评估(独立于检索的 loading 状态, 不阻塞主检索) */
+/** 证据评估(与检索并行, 同屏展示: 上=检索结果, 下=证据评估判定) */
 const evaluating = ref(false);
 const evidenceResult = ref<AiEvidenceApi.EvaluateResp | null>(null);
 const expandedEvidence = ref<Set<number>>(new Set()); // 展开的证据 chunkId
-
-/** 当前视图: search=检索结果 / evidence=证据评估(两者互斥, 评估时隐藏检索结果区) */
-const activeView = ref<'evidence' | 'search'>('search');
 
 /** 被冲突引用的证据索引集合(用于红色边框高亮) */
 const conflictIndexes = computed(() => {
@@ -118,7 +115,7 @@ const CHANNEL_COLOR: Record<string, string> = {
   fused: 'purple',
 };
 
-/** 检索 */
+/** 检索 + 证据评估(并行执行, 同屏展示: 检索结果列表 + 充分性判定/冲突/Claim/回答) */
 async function handleSearch() {
   const keyword = query.value.trim();
   if (!keyword) {
@@ -126,41 +123,26 @@ async function handleSearch() {
     return;
   }
   loading.value = true;
-  result.value = null;
-  activeView.value = 'search';
-  try {
-    result.value = await searchRetrieval({
-      query: keyword,
-      kbIds: kbIds.value.length > 0 ? kbIds.value : undefined,
-      topK: 5,
-    });
-  } catch {
-    message.error('检索失败');
-  } finally {
-    loading.value = false;
-  }
-}
-
-/** 证据评估(与检索同输入, topK=8) */
-async function handleEvaluate() {
-  const keyword = query.value.trim();
-  if (!keyword) {
-    message.warning('请输入检索内容');
-    return;
-  }
   evaluating.value = true;
+  result.value = null;
   evidenceResult.value = null;
   expandedEvidence.value = new Set();
-  activeView.value = 'evidence';
+  const params = {
+    query: keyword,
+    kbIds: kbIds.value.length > 0 ? kbIds.value : undefined,
+  };
   try {
-    evidenceResult.value = await evaluateEvidence({
-      query: keyword,
-      kbIds: kbIds.value.length > 0 ? kbIds.value : undefined,
-      topK: 8,
-    });
+    // 并行: 检索(topK=5)与证据评估(topK=8, 内部含检索+判定+生成)同时发起, 谁先到谁先渲染
+    const [searchResp, evaluateResp] = await Promise.all([
+      searchRetrieval({ ...params, topK: 5 }),
+      evaluateEvidence({ ...params, topK: 8 }),
+    ]);
+    result.value = searchResp;
+    evidenceResult.value = evaluateResp;
   } catch {
-    message.error('证据评估失败');
+    message.error('检索/评估失败');
   } finally {
+    loading.value = false;
     evaluating.value = false;
   }
 }
@@ -236,11 +218,12 @@ function renderAnswer(answer?: string): string {
           placeholder="全部可见知识库"
           allow-clear
         />
-        <Button type="primary" :loading="loading" @click="handleSearch">
+        <Button
+          type="primary"
+          :loading="loading || evaluating"
+          @click="handleSearch"
+        >
           检索
-        </Button>
-        <Button :loading="evaluating" @click="handleEvaluate">
-          证据评估
         </Button>
         <span
           v-if="evaluating"
@@ -250,8 +233,7 @@ function renderAnswer(answer?: string): string {
         </span>
       </div>
 
-      <!-- 检索结果区(与证据评估互斥, 评估时隐藏) -->
-      <template v-if="activeView === 'search'">
+      <!-- 检索结果区(与证据评估同屏: 上=检索结果, 下=证据评估判定) -->
       <!-- 分析区 -->
       <div
         v-if="result?.analysis"
@@ -378,11 +360,10 @@ function renderAnswer(answer?: string): string {
           </Card>
         </div>
       </template>
-      </template>
 
-      <!-- 证据评估面板(独立于检索, 同输入 topK=8; 评估时覆盖检索结果区) -->
+      <!-- 证据评估判定面板(与检索结果同屏展示: 充分性/冲突/Claim/回答) -->
       <Card
-        v-if="activeView === 'evidence' && evidenceResult"
+        v-if="evidenceResult"
         size="small"
         class="border-border"
       >
