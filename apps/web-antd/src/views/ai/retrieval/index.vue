@@ -37,6 +37,9 @@ const evaluating = ref(false);
 const evidenceResult = ref<AiEvidenceApi.EvaluateResp | null>(null);
 const expandedEvidence = ref<Set<number>>(new Set()); // 展开的证据 chunkId
 
+/** 当前视图: search=检索结果 / evidence=证据评估(两者互斥, 评估时隐藏检索结果区) */
+const activeView = ref<'search' | 'evidence'>('search');
+
 /** 被冲突引用的证据索引集合(用于红色边框高亮) */
 const conflictIndexes = computed(() => {
   const set = new Set<number>();
@@ -116,6 +119,7 @@ async function handleSearch() {
   }
   loading.value = true;
   result.value = null;
+  activeView.value = 'search';
   try {
     result.value = await searchRetrieval({
       query: keyword,
@@ -139,6 +143,7 @@ async function handleEvaluate() {
   evaluating.value = true;
   evidenceResult.value = null;
   expandedEvidence.value = new Set();
+  activeView.value = 'evidence';
   try {
     evidenceResult.value = await evaluateEvidence({
       query: keyword,
@@ -237,6 +242,8 @@ function renderAnswer(answer?: string): string {
         </span>
       </div>
 
+      <!-- 检索结果区(与证据评估互斥, 评估时隐藏) -->
+      <template v-if="activeView === 'search'">
       <!-- 分析区 -->
       <div
         v-if="result?.analysis"
@@ -364,9 +371,11 @@ function renderAnswer(answer?: string): string {
         </div>
       </template>
 
-      <!-- 证据评估面板(独立于检索, 同输入 topK=8) -->
+      </template>
+
+      <!-- 证据评估面板(独立于检索, 同输入 topK=8; 评估时覆盖检索结果区) -->
       <Card
-        v-if="evidenceResult"
+        v-if="activeView === 'evidence' && evidenceResult"
         size="small"
         class="border-border"
       >
