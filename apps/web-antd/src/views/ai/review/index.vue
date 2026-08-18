@@ -9,10 +9,11 @@ import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
-import { Modal, Tag, message } from 'ant-design-vue';
+import { Modal, Tag, message, Descriptions } from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getChunk } from '#/api/ai/chunk';
+import type { AiChunkApi } from '#/api/ai/chunk';
 import {
   approveReviewItem,
   getReviewItemPage,
@@ -42,6 +43,21 @@ async function loadChunk(row: AiReviewApi.ReviewItem) {
     chunkContents[row.chunkId] = content;
   } catch {
     chunkContents[row.chunkId] = '(片段加载失败)';
+  }
+}
+
+/** 片段详情弹窗(点击来源片段 id 打开) */
+const chunkDetailOpen = ref(false);
+const chunkDetail = ref<AiChunkApi.Chunk>();
+async function openChunkDetail(chunkId?: number) {
+  if (!chunkId) {
+    return;
+  }
+  try {
+    chunkDetail.value = await getChunk(chunkId);
+    chunkDetailOpen.value = true;
+  } catch {
+    message.error('片段详情加载失败');
   }
 }
 
@@ -193,7 +209,7 @@ const gridOptions: VxeTableGridOptions<AiReviewApi.ReviewItem> = {
     {
       field: 'chunkId',
       title: '来源片段',
-      width: 100,
+      width: 110,
       slots: { default: 'chunkId' },
     },
     {
@@ -309,7 +325,13 @@ const [Grid, gridApi] = useVbenVxeGrid({
         </Tag>
       </template>
       <template #chunkId="{ row }">
-        <span v-if="row.chunkId" class="text-blue-500">{{ row.chunkId }}</span>
+        <a
+          v-if="row.chunkId"
+          class="text-blue-500 hover:underline"
+          @click="openChunkDetail(row.chunkId)"
+        >
+          #{{ row.chunkId }}
+        </a>
         <span v-else class="text-muted-foreground">-</span>
       </template>
       <template #expand_content="{ row }">
@@ -351,6 +373,50 @@ const [Grid, gridApi] = useVbenVxeGrid({
         :rows="3"
         placeholder="请填写驳回原因(必填)"
       />
+    </Modal>
+
+    <!-- 来源片段详情弹窗(点击片段 id 打开; 规范: antd Modal z-index 1000 + destroyOnClose) -->
+    <Modal
+      v-model:open="chunkDetailOpen"
+      title="片段详情"
+      width="720px"
+      :z-index="1000"
+      :destroy-on-close="true"
+      :footer="null"
+    >
+      <template v-if="chunkDetail">
+        <div class="mb-4">
+          <div class="mb-2 text-sm font-bold text-muted-foreground">片段内容：</div>
+          <div
+            class="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 leading-6"
+          >
+            {{ chunkDetail.content }}
+          </div>
+        </div>
+        <Descriptions :column="2" bordered size="small">
+          <Descriptions.Item label="片段 ID">
+            {{ chunkDetail.id }}
+          </Descriptions.Item>
+          <Descriptions.Item label="类型">
+            {{ chunkDetail.chunkType }}
+          </Descriptions.Item>
+          <Descriptions.Item label="所属文档">
+            {{ chunkDetail.documentName || chunkDetail.documentId || '-' }}
+          </Descriptions.Item>
+          <Descriptions.Item label="版本">
+            {{ chunkDetail.versionNo || '-' }}
+          </Descriptions.Item>
+          <Descriptions.Item label="状态">
+            {{ chunkDetail.status }}
+          </Descriptions.Item>
+          <Descriptions.Item label="父块">
+            {{ chunkDetail.parentId ?? '-' }}
+          </Descriptions.Item>
+          <Descriptions.Item label="元数据" :span="2">
+            {{ chunkDetail.metadata || '-' }}
+          </Descriptions.Item>
+        </Descriptions>
+      </template>
     </Modal>
   </Page>
 </template>
