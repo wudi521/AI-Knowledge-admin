@@ -44,5 +44,9 @@ export function evaluateEvidence(data: {
   return requestClient.post<AiEvidenceApi.EvaluateResp>(
     '/evidence/evaluate',
     data,
+    {
+      // 评估链路含多次 LLM 调用(qwen3-8b CPU 推理, 实测 12~60s), 默认 30s 会超时
+      timeout: 180_000,
+    },
   );
 }

@@ -151,7 +151,6 @@ async function handleEvaluate() {
     evaluating.value = false;
   }
 }
-
 /** HTML 转义(先转义再高亮, 防 XSS) */
 function escapeHtml(text: string): string {
   return text
@@ -230,6 +229,12 @@ function renderAnswer(answer?: string): string {
         <Button :loading="evaluating" @click="handleEvaluate">
           证据评估
         </Button>
+        <span
+          v-if="evaluating"
+          class="text-xs text-muted-foreground"
+        >
+          评估中…含多轮 AI 判定, 约需 10~60 秒
+        </span>
       </div>
 
       <!-- 分析区 -->
