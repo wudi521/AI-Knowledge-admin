@@ -71,6 +71,18 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
+        path: 'retrieval',
+        component: () => import('#/views/ai/retrieval/index.vue'),
+        name: 'AiRetrieval',
+        meta: {
+          noCache: true,
+          hidden: true,
+          canTo: true,
+          title: '检索测试',
+          activePath: '/ai/knowledge',
+        },
+      },
+      {
         path: 'knowledge/segment',
         component: () => import('#/views/ai/knowledge/segment/index.vue'),
         name: 'AiKnowledgeSegment',
