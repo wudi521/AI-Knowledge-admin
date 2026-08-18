@@ -7,6 +7,7 @@ export namespace AiChunkApi {
     id: number; // 片段编号
     documentId: number; // 文档编号(version_id 映射)
     documentName?: string; // 文档名(联表)
+    versionNo?: string; // 所属版本号(联表)
     storagePath?: string; // MinIO 下载路径(联表)
     chunkType: string; // 类型: SEMANTIC/TABLE/FAQ/POLICY
     content: string; // 片段内容
