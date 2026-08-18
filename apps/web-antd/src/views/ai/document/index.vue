@@ -4,7 +4,7 @@ import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 
 import type { KnowledgeDocument } from '#/api/ai/knowledge';
 
-import { ref } from 'vue';
+import { onBeforeUnmount, ref } from 'vue';
 
 import { useRouter } from 'vue-router';
 
@@ -129,6 +129,7 @@ const STATUS_TAG: Record<string, { color: string; text: string }> = {
   PENDING: { color: 'default', text: '待解析' },
   PARSING: { color: 'processing', text: '解析中' },
   EMBEDDING: { color: 'warning', text: '向量化中' },
+  EXTRACTING: { color: 'processing', text: '抽取中' },
   REVIEW: { color: 'blue', text: '审核中' },
   INDEXED: { color: 'success', text: '已入库' },
   PUBLISHED: { color: 'success', text: '已发布' },
@@ -183,6 +184,26 @@ async function handleRetryExtract(row: KnowledgeDocument) {
   }
 }
 
+/** 状态异步刷新: 有处理中/待审核文档时每 10s 自动刷新列表 */
+const BUSY_STATUS = ['PENDING', 'PARSING', 'EMBEDDING', 'EXTRACTING', 'REVIEW'];
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function startPollingIfBusy(list: KnowledgeDocument[]) {
+  const busy = list.some((d) => d.parseStatus && BUSY_STATUS.includes(d.parseStatus));
+  if (busy && !pollTimer) {
+    pollTimer = setInterval(() => gridApi.query(), 10000);
+  } else if (!busy) {
+    stopPolling();
+  }
+}
+
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: {
     schema: useGridFormSchema() as VbenFormSchema[],
@@ -194,11 +215,13 @@ const [Grid, gridApi] = useVbenVxeGrid({
     proxyConfig: {
       ajax: {
         query: async ({ page }, formValues) => {
-          return await getDocumentPage({
+          const data = await getDocumentPage({
             pageNo: page.currentPage,
             pageSize: page.pageSize,
             ...formValues,
           });
+          startPollingIfBusy(data.list ?? []);
+          return data;
         },
       },
     },
@@ -212,6 +235,8 @@ const [Grid, gridApi] = useVbenVxeGrid({
     },
   } as VxeTableGridOptions<KnowledgeDocument>,
 });
+
+onBeforeUnmount(() => stopPolling());
 </script>
 
 <template>

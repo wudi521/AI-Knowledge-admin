@@ -39,6 +39,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
           { label: '待解析', value: 'PENDING' },
           { label: '解析中', value: 'PARSING' },
           { label: '向量化中', value: 'EMBEDDING' },
+          { label: '抽取中', value: 'EXTRACTING' },
           { label: '审核中', value: 'REVIEW' },
           { label: '已入库', value: 'INDEXED' },
           { label: '已发布', value: 'PUBLISHED' },
