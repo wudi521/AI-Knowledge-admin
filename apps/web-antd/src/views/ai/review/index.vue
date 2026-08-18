@@ -12,12 +12,38 @@ import { Page } from '@vben/common-ui';
 import { Modal, Tag, message } from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
+import { getChunk } from '#/api/ai/chunk';
 import {
   approveReviewItem,
   getReviewItemPage,
   rejectReviewItem,
 } from '#/api/ai/review';
 import { publishVersion } from '#/api/ai/version';
+
+/** 来源片段内容缓存(展开行懒加载) */
+import { reactive } from 'vue';
+const chunkCache = new Map<number, string>();
+const chunkContents = reactive<Record<number, string>>({});
+
+/** 展开行时加载来源片段内容 */
+async function loadChunk(row: AiReviewApi.ReviewItem) {
+  if (!row.chunkId || chunkContents[row.chunkId] !== undefined) {
+    return;
+  }
+  chunkContents[row.chunkId] = '';
+  if (chunkCache.has(row.chunkId)) {
+    chunkContents[row.chunkId] = chunkCache.get(row.chunkId)!;
+    return;
+  }
+  try {
+    const chunk = await getChunk(row.chunkId);
+    const content = chunk?.content || '(片段不存在)';
+    chunkCache.set(row.chunkId, content);
+    chunkContents[row.chunkId] = content;
+  } catch {
+    chunkContents[row.chunkId] = '(片段加载失败)';
+  }
+}
 
 const route = useRoute();
 const router = useRouter();
@@ -123,6 +149,11 @@ async function handlePublish() {
 const gridOptions: VxeTableGridOptions<AiReviewApi.ReviewItem> = {
   columns: [
     {
+      type: 'expand',
+      width: 40,
+      slots: { content: 'expand_content' },
+    },
+    {
       field: 'title',
       title: '主题',
       minWidth: 180,
@@ -158,6 +189,12 @@ const gridOptions: VxeTableGridOptions<AiReviewApi.ReviewItem> = {
       title: '来源文档',
       minWidth: 140,
       showOverflow: true,
+    },
+    {
+      field: 'chunkId',
+      title: '来源片段',
+      width: 100,
+      slots: { default: 'chunkId' },
     },
     {
       field: 'reviewer',
@@ -226,7 +263,16 @@ function buildActions(row: AiReviewApi.ReviewItem): ActionItem[] {
   return actions;
 }
 
-const [Grid, gridApi] = useVbenVxeGrid({ gridOptions });
+const [Grid, gridApi] = useVbenVxeGrid({
+  gridOptions,
+  gridEvents: {
+    expandChange: ({ row, expanded }: any) => {
+      if (expanded) {
+        loadChunk(row);
+      }
+    },
+  } as any,
+});
 </script>
 
 <template>
@@ -261,6 +307,20 @@ const [Grid, gridApi] = useVbenVxeGrid({ gridOptions });
         <Tag :color="ITEM_TYPE_TAG[row.itemType]?.color || 'default'">
           {{ ITEM_TYPE_TAG[row.itemType]?.text || row.itemType }}
         </Tag>
+      </template>
+      <template #chunkId="{ row }">
+        <span v-if="row.chunkId" class="text-blue-500">{{ row.chunkId }}</span>
+        <span v-else class="text-muted-foreground">-</span>
+      </template>
+      <template #expand_content="{ row }">
+        <div class="whitespace-pre-wrap border-l-4 border-blue-500 px-2.5 py-5 leading-5">
+          <div class="mb-2 text-sm font-bold text-muted-foreground">
+            来源片段 #{{ row.chunkId || '-' }}
+          </div>
+          {{
+            chunkContents[row.chunkId ?? -1] ?? (row.chunkId ? '片段内容加载中…' : '无来源片段(未匹配到)')
+          }}
+        </div>
       </template>
       <template #riskLevel="{ row }">
         <Tag :color="RISK_TAG[row.riskLevel]?.color || 'default'">

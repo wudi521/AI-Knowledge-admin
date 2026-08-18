@@ -46,3 +46,8 @@ export function deleteChunk(id: number) {
 export function deleteChunkBatch(ids: number[]) {
   return requestClient.delete(`/ingestion/chunk/delete-batch?ids=${ids.join(',')}`);
 }
+
+/** 获得片段详情(含内容, 审核台展示来源片段用) */
+export function getChunk(id: number) {
+  return requestClient.get<AiChunkApi.Chunk>(`/ingestion/chunk/get?id=${id}`);
+}
