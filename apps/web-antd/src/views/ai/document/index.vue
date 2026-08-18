@@ -57,7 +57,16 @@ function getDocType(name: string): string {
   return map[ext] || 'OTHER';
 }
 
-/** 上传文档: 先传 MinIO, 再登记 ai_document */
+/** 计算文件 SHA-256(Web Crypto, 分块读取防大文件卡死) */
+async function calcFileHash(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest('SHA-256', buffer);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/** 上传文档: 先传 MinIO, 再登记 ai_document(带文件指纹, 重复文档由后端拦截) */
 async function handleUploadFile(file: File) {
   // 校验知识库已选择
   const kbId = (await gridApi.formApi.getValues()).kbId;
@@ -69,16 +78,20 @@ async function handleUploadFile(file: File) {
     message.loading({ content: `上传中: ${file.name}...`, key: 'upload' });
     // 统一走文件服务: { file, directory } 结构
     const url = (await uploadFile({ file, directory: 'kb-docs' } as any)) as unknown as string;
+    // 计算文件指纹(重复文档拦截, BR-002)
+    const fileHash = await calcFileHash(file);
     await createDocument({
       kbId,
       name: file.name,
       type: getDocType(file.name),
       storagePath: url,
+      fileHash,
     });
     message.success({ content: `「${file.name}」已登记入库(待解析)`, key: 'upload' });
     handleRefresh();
-  } catch {
-    message.error({ content: `「${file.name}」上传失败`, key: 'upload' });
+  } catch (e: any) {
+    const msg = e?.message || '上传失败';
+    message.error({ content: `「${file.name}」${msg}`, key: 'upload' });
   }
   return false;
 }
