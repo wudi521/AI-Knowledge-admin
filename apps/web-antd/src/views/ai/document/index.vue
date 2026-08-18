@@ -211,7 +211,8 @@ function pollRowStatus(docId: number) {
       row.versionStatus = doc.versionStatus;
       if (
         ticks > 60 ||
-        ['PUBLISHED', 'FAILED', 'INDEXED'].includes(doc.parseStatus)
+        (doc.parseStatus &&
+          ['PUBLISHED', 'FAILED', 'INDEXED'].includes(doc.parseStatus))
       ) {
         stopRowPolling();
       }
