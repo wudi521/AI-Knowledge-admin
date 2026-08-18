@@ -28,6 +28,8 @@ export namespace AiRetrievalApi {
     analysis?: Analysis;
     channels?: ChannelStat;
     answer?: string;
+    answerBlocked?: boolean;
+    answerReason?: string;
     results: ResultItem[];
   }
 }

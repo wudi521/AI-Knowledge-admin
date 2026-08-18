@@ -218,8 +218,24 @@ function renderAnswer(answer?: string): string {
         </div>
       </div>
 
+      <!-- 产品不匹配拒绝作答(结构化门禁) -->
+      <Card
+        v-if="result?.answerBlocked"
+        size="small"
+        class="border-red-500/50 bg-red-50/60 dark:bg-red-950/20"
+      >
+        <div class="mb-1 flex items-center gap-2">
+          <span class="text-sm font-bold">无法回答</span>
+          <Tag color="error">产品/品牌不匹配</Tag>
+        </div>
+        <div class="leading-6 text-card-foreground">{{ result.answerReason }}</div>
+        <div class="mt-1 text-xs text-muted-foreground">
+          下方为检索到的相关片段(仅作参考, 未确认适用于您的问题)
+        </div>
+      </Card>
+
       <!-- AI 总结 -->
-      <Card v-if="result?.answer" size="small" class="border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/20">
+      <Card v-if="result?.answer && !result?.answerBlocked" size="small" class="border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/20">
         <div class="mb-1 flex items-center gap-2">
           <span class="text-sm font-bold">AI 总结</span>
           <Tag color="blue">基于检索结果生成</Tag>
