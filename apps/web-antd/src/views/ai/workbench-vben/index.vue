@@ -1,5 +1,7 @@
 <script lang="ts" setup>
-import { computed, nextTick, reactive, ref } from 'vue';
+import type { AiChatApi } from '#/api/ai/chat';
+
+import { computed, nextTick, onMounted, ref } from 'vue';
 
 import {
   Avatar,
@@ -10,114 +12,104 @@ import {
   Empty,
   Input,
   List,
+  message,
+  Progress,
   Row,
   Space,
   Tag,
-  message,
 } from 'ant-design-vue';
 
-// 会话列表
-const conversations = reactive([
-  { id: 1, name: '售后咨询 · 李女士', time: '09:12', type: '售后', color: 'orange' },
-  { id: 2, name: '订单查询 · 王先生', time: '08:47', type: '订单', color: 'green' },
-  { id: 3, name: '产品咨询 · 张小姐', time: '昨日', type: '产品', color: 'blue' },
-  { id: 4, name: '价格咨询 · 陈先生', time: '昨日', type: '价格', color: 'purple' },
-]);
-const curId = ref(1);
-const cur = computed(() => conversations.find((c) => c.id === curId.value) || conversations[0]);
+import {
+  getChatConversations,
+  getChatHistory,
+  sendChatMessage,
+  takeOverConversation,
+  transferConversation,
+} from '#/api/ai/chat';
 
-interface Msg {
-  role: 'user' | 'ai';
-  text: string;
-  time: string;
-  cites?: string[];
+// ===== 会话列表 =====
+const conversations = ref<AiChatApi.Conversation[]>([]);
+const loadingList = ref(false);
+const curId = ref<null | number>(null);
+const curConv = computed(
+  () => conversations.value.find((c) => c.id === curId.value) || null,
+);
+
+/** 状态展示映射 */
+const STATUS_TEXT: Record<string, { color: string; text: string; }> = {
+  ACTIVE: { text: '进行中', color: 'blue' },
+  TRANSFERRED: { text: '待接管', color: 'orange' },
+  CLOSED: { text: '已结束', color: 'default' },
+};
+
+/** 排序权重: TRANSFERRED 优先置顶 → ACTIVE → CLOSED */
+const STATUS_ORDER: Record<string, number> = {
+  TRANSFERRED: 0,
+  ACTIVE: 1,
+  CLOSED: 2,
+};
+const sortedConversations = computed(() =>
+  [...conversations.value].sort(
+    (a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9),
+  ),
+);
+
+/** 会话列表 Badge(TRANSFERRED 橙色闪烁, ACTIVE 绿点, CLOSED 灰点) */
+function convBadge(item: AiChatApi.Conversation): {
+  color?: string;
+  status: 'default' | 'processing' | 'success';
+} {
+  if (item.status === 'TRANSFERRED') {
+    return { status: 'processing', color: 'orange' };
+  }
+  if (item.status === 'ACTIVE') {
+    return { status: 'success' };
+  }
+  return { status: 'default' };
 }
-const msgs = reactive<Msg[]>([
-  {
-    role: 'user',
-    text: '我上周买的商品想退货，请问流程是怎样的？',
-    time: '09:12:03',
-  },
-  {
-    role: 'ai',
-    text: '您好，李女士 😊 根据我们的退换货政策，您可以在签收后 7 天内申请无理由退货。流程如下：① 在订单详情页点击「申请售后」；② 选择「退货退款」并填写原因；③ 系统审核通过后，将为您推送上门取件码。',
-    time: '09:12:06',
-    cites: ['《产品手册·退换货政策》第 12 节', '《FAQ·运费说明》第 3 条'],
-  },
-  {
-    role: 'user',
-    text: '运费谁来承担？',
-    time: '09:12:31',
-  },
-  {
-    role: 'ai',
-    text: '如果是因为商品质量问题退货，运费由我们承担；如果是无理由退货（7 天内），未满 99 元订单需您承担运费，已满 99 元订单由我们承担。您的订单实付金额为 128 元，属于满额包邮，运费无需您承担 ✔',
-    time: '09:12:34',
-    cites: ['《FAQ·运费说明》第 3 条'],
-  },
-]);
 
-// 检索证据（卡片化，固定配色深浅适配）
-const evidences = [
-  {
-    score: '0.94',
-    name: '《产品手册·退换货政策》',
-    section: '第 12 节 · 退货条款',
-    desc: '签收后 7 天内可申请无理由退货，商品需保持完好…',
-    tag: '政策',
-    cls: 'green',
-    src: 'docs/20260815/退换货政策.md',
-  },
-  {
-    score: '0.87',
-    name: '《FAQ·运费说明》',
-    section: '第 3 条 · 包邮规则',
-    desc: '单笔订单实付满 99 元包邮，超重商品按体积计费…',
-    tag: 'FAQ',
-    cls: 'orange',
-    src: 'docs/20260815/运费说明.md',
-  },
-  {
-    score: '0.71',
-    name: '《产品手册·售后时效》',
-    section: '第 5 节 · 响应承诺',
-    desc: '售后申请提交后 48 小时内完成审核并给出处理方案…',
-    tag: '时效',
-    cls: 'blue',
-    src: 'docs/20260815/售后时效.md',
-  },
-];
+// ===== 消息流 =====
+const msgs = ref<AiChatApi.Message[]>([]);
+const loadingHistory = ref(false);
 
+// ===== 发送 =====
 const draft = ref('');
+const sending = ref(false);
+const lastSend = ref<AiChatApi.SendResp | null>(null);
+const inputRef = ref<{ focus: () => void }>();
 const chatBox = ref<HTMLElement>();
 
-function send() {
-  const text = draft.value.trim();
-  if (!text) return;
-  msgs.push({ role: 'user', text, time: new Date().toTimeString().slice(0, 8) });
-  draft.value = '';
-  setTimeout(() => {
-    msgs.push({
-      role: 'ai',
-      text: '已收到您的问题，正在为您检索知识库…（vben 风格样板页，暂未接入真实模型）',
-      time: new Date().toTimeString().slice(0, 8),
-      cites: ['《产品手册·FAQ》示例片段'],
-    });
-    scrollBottom();
-  }, 600);
-  scrollBottom();
+/** 本地临时消息 id 序列(避免 -Date.now() 同毫秒碰撞) */
+let localSeq = 0;
+function localId(): number {
+  return -(++localSeq);
 }
 
-function newChat() {
-  conversations.unshift({
-    id: Date.now(),
-    name: '新会话',
-    time: '刚刚',
-    type: '咨询',
-    color: 'cyan',
-  });
-  curId.value = conversations[0].id;
-  message.success('已创建新会话');
+// ===== 转人工 / 接管 =====
+const transferring = ref(false);
+const takingOver = ref(false);
+
+/** 交接摘要卡片是否展示(TRANSFERRED 或 summary 非空) */
+const showSummaryCard = computed(
+  () =>
+    !!curConv.value &&
+    (curConv.value.status === 'TRANSFERRED' || !!curConv.value.summary),
+);
+
+/** 证据面板是否展示(最近一次 send 有 answerable 判定) */
+const evidenceVisible = computed(
+  () => !!lastSend.value && lastSend.value.answerable != null,
+);
+
+// ===== 工具 =====
+/** 时间格式化(后端 LocalDateTime 序列化为 epoch 毫秒, 兼容字符串) */
+function formatTime(value?: number | string): string {
+  if (value == null || value === '') return '';
+  const date =
+    typeof value === 'number' ? new Date(value) : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function scrollBottom() {
@@ -125,6 +117,186 @@ function scrollBottom() {
     if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight;
   });
 }
+
+/** HTML 转义(先转义再格式化, 防 XSS) */
+function escapeHtml(text: string): string {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+/** AI 内容渲染: 转义后把 [C{n}] 引用编号美化为角标(防 XSS) */
+function renderAnswer(content?: string): string {
+  const safe = escapeHtml(content || '');
+  return safe.replace(
+    /\[C(\d+)\]/g,
+    (_m, num: string) => `<span class="wb-cite-inline">[C${num}]</span>`,
+  );
+}
+
+// ===== 数据加载 =====
+async function loadConversations() {
+  loadingList.value = true;
+  try {
+    const data = await getChatConversations({ pageNo: 1, pageSize: 50 });
+    conversations.value = data.list || [];
+  } catch {
+    message.error('会话列表加载失败');
+  } finally {
+    loadingList.value = false;
+  }
+}
+
+async function loadHistory(conversationId: number) {
+  loadingHistory.value = true;
+  try {
+    const data = await getChatHistory(conversationId);
+    msgs.value = data.messages || [];
+    // 用最新会话信息刷新列表项(状态/摘要可能已变化)
+    if (data.conversation) {
+      const idx = conversations.value.findIndex(
+        (c) => c.id === data.conversation.id,
+      );
+      if (idx >= 0) {
+        conversations.value[idx] = data.conversation;
+      } else {
+        conversations.value.unshift(data.conversation);
+      }
+    }
+    scrollBottom();
+  } catch {
+    message.error('会话记录加载失败');
+  } finally {
+    loadingHistory.value = false;
+  }
+}
+
+async function selectConversation(conv: AiChatApi.Conversation) {
+  curId.value = conv.id;
+  lastSend.value = null;
+  await loadHistory(conv.id);
+}
+
+/** 新建会话: 清空当前显示, conversationId=null 待发送时由后端创建 */
+function newChat() {
+  curId.value = null;
+  msgs.value = [];
+  lastSend.value = null;
+  nextTick(() => inputRef.value?.focus());
+}
+
+// ===== 发送 =====
+async function send() {
+  const text = draft.value.trim();
+  if (!text || sending.value) return;
+  sending.value = true;
+  // 本地先展示客户消息(不等后端)
+  msgs.value.push({
+    id: localId(),
+    role: 'USER',
+    content: text,
+    createTime: Date.now(),
+  });
+  draft.value = '';
+  scrollBottom();
+  try {
+    const resp = await sendChatMessage({
+      conversationId: curId.value || undefined,
+      message: text,
+      channel: 'WEB',
+    });
+    lastSend.value = resp;
+    // 新建会话: 更新当前会话编号并让新会话进入列表
+    if (resp.conversationId && resp.conversationId !== curId.value) {
+      curId.value = resp.conversationId;
+      await loadConversations();
+    }
+    if (resp.transferRequired) {
+      // 后端已落库 SYSTEM 交接消息与 summary → 重新拉取历史
+      if (resp.conversationId) {
+        await loadHistory(resp.conversationId);
+      } else {
+        // 兜底: 本地构造 SYSTEM 交接消息
+        msgs.value.push({
+          id: localId(),
+          role: 'SYSTEM',
+          content: resp.summary || '该问题已转人工, 请人工坐席接单处理',
+          createTime: Date.now(),
+        });
+      }
+      message.warning(resp.transferReason || '该问题已转人工处理');
+    } else if (resp.reply) {
+      msgs.value.push({
+        id: localId(),
+        role: 'AI',
+        content: resp.reply,
+        citations: (resp.citations || []).map(String),
+        confidence: resp.confidence ?? undefined,
+        traceId: resp.traceId ?? undefined,
+        createTime: Date.now(),
+      });
+      scrollBottom();
+    } else {
+      msgs.value.push({
+        id: localId(),
+        role: 'AI',
+        content: '(本次未返回回答, 请重试或转人工处理)',
+        createTime: Date.now(),
+      });
+      scrollBottom();
+    }
+  } catch {
+    // 请求拦截器已统一提示错误; 保留客户消息, 不阻塞输入
+  } finally {
+    sending.value = false;
+  }
+}
+
+// ===== 转人工 / 接管 =====
+async function handleTransfer() {
+  if (curId.value == null || transferring.value || !curConv.value) return;
+  transferring.value = true;
+  try {
+    await transferConversation({
+      conversationId: curId.value,
+      reason: '坐席手动转人工',
+    });
+    message.success('已转人工, 等待人工坐席接单');
+    await loadConversations();
+    if (curId.value != null) await loadHistory(curId.value);
+  } catch {
+    // 拦截器已提示
+  } finally {
+    transferring.value = false;
+  }
+}
+
+async function handleTakeOver() {
+  if (curId.value == null || takingOver.value) return;
+  takingOver.value = true;
+  try {
+    await takeOverConversation({ conversationId: curId.value });
+    message.success('接管成功, 该会话由您人工处理');
+    await loadConversations();
+    if (curId.value != null) await loadHistory(curId.value);
+  } catch {
+    // 拦截器已提示
+  } finally {
+    takingOver.value = false;
+  }
+}
+
+onMounted(async () => {
+  await loadConversations();
+  // 自动选中第一个会话(TRANSFERRED 优先置顶)
+  const first = sortedConversations.value[0];
+  if (first) {
+    await selectConversation(first);
+  }
+});
 </script>
 
 <template>
@@ -132,7 +304,7 @@ function scrollBottom() {
     <div class="wb-page-head">
       <div>
         <h2 class="wb-page-title">AI 客服工作台</h2>
-        <p class="wb-page-desc">vben 原生风格样板页 · 会话接待 / 知识引用 / 人工转接</p>
+        <p class="wb-page-desc">会话接待 / 知识引用 / 人工转接 · 已接入真实 API</p>
       </div>
       <Space>
         <Tag color="blue">Qwen2.5-72B</Tag>
@@ -144,16 +316,35 @@ function scrollBottom() {
       <!-- 左: 会话列表 -->
       <Col :span="5">
         <Card title="会话列表" size="small" class="wb-card wb-side-card">
-          <List :data-source="conversations" :pagination="false" size="small" class="wb-conv-list">
+          <List
+            :data-source="sortedConversations"
+            :loading="loadingList"
+            :pagination="false"
+            size="small"
+            class="wb-conv-list"
+          >
             <template #renderItem="{ item }">
               <List.Item
                 class="wb-conv-item"
                 :class="{ 'wb-conv-active': item.id === curId }"
-                @click="curId = item.id"
+                @click="selectConversation(item)"
               >
-                <Badge :color="item.color" />
-                <span class="wb-conv-name">{{ item.name }}</span>
-                <span class="wb-conv-time">{{ item.time }}</span>
+                <Badge v-bind="convBadge(item)" />
+                <span class="wb-conv-name">
+                  <span>会话 #{{ item.id }}</span>
+                  <span v-if="item.customerId" class="wb-conv-cust-inline">
+                    · {{ item.customerId }}
+                  </span>
+                </span>
+                <Tag
+                  :color="STATUS_TEXT[item.status]?.color || 'default'"
+                  class="wb-conv-status"
+                >
+                  {{ STATUS_TEXT[item.status]?.text || item.status }}
+                </Tag>
+                <span class="wb-conv-time">
+                  {{ formatTime(item.createTime) }}
+                </span>
               </List.Item>
             </template>
           </List>
@@ -166,56 +357,179 @@ function scrollBottom() {
           <template #title>
             <Space>
               <Badge status="processing" color="green" />
-              <span>{{ cur.name }}</span>
+              <span>{{ curConv ? `会话 #${curConv.id}` : '新会话' }}</span>
+              <span v-if="curConv?.customerId" class="wb-chat-customer">
+                {{ curConv.customerId }}
+              </span>
             </Space>
           </template>
-          <template #extra>
-            <Space>
-              <Button size="small">清空</Button>
-              <Button size="small" danger>转人工</Button>
-            </Space>
-          </template>
+
+          <!-- 交接摘要卡片(TRANSFERRED 或 summary 非空) -->
+          <div v-if="showSummaryCard" class="wb-summary-inline">
+            <div class="wb-summary-head">
+              <Badge status="warning" />
+              <span class="wb-summary-title">交接摘要</span>
+              <Tag
+                v-if="curConv?.transferReason"
+                color="red"
+                class="wb-summary-tag"
+              >
+                {{ curConv.transferReason }}
+              </Tag>
+            </div>
+            <div class="wb-summary-text">
+              {{ curConv?.summary || '该会话已转人工, 请人工坐席接单处理' }}
+            </div>
+          </div>
 
           <div ref="chatBox" class="wb-msgs">
-            <div v-for="(m, i) in msgs" :key="i" class="wb-msg" :class="m.role">
-              <div class="wb-avatar-wrap" :class="m.role">
-                <Avatar :size="40" :class="['wb-avatar', m.role]">
-                  <template #icon>
-                    <span class="wb-avatar-txt">{{ m.role === 'ai' ? 'AI' : '客' }}</span>
-                  </template>
-                </Avatar>
-                <span class="wb-avatar-dot" :class="m.role"></span>
+            <div
+              v-for="(m, i) in msgs"
+              :key="i"
+              class="wb-msg"
+              :class="m.role.toLowerCase()"
+            >
+              <!-- SYSTEM: 居中灰条交接消息 -->
+              <div v-if="m.role === 'SYSTEM'" class="wb-msg-system">
+                <Tag color="red" class="wb-system-tag">转人工交接</Tag>
+                <span class="wb-system-text">{{ m.content }}</span>
+                <span class="wb-system-time">
+                  {{ formatTime(m.createTime) }}
+                </span>
               </div>
 
-              <div class="wb-msg-main">
-                <div class="wb-msg-head">
-                  <span class="wb-msg-name">{{ m.role === 'ai' ? '客服助手' : '访客' }}</span>
-                  <span class="wb-msg-time">{{ m.time }}</span>
+              <!-- USER / AI 气泡 -->
+              <template v-else>
+                <div class="wb-avatar-wrap" :class="m.role.toLowerCase()">
+                  <Avatar
+                    :size="40"
+                    class="wb-avatar" :class="[m.role.toLowerCase()]"
+                  >
+                    <template #icon>
+                      <span class="wb-avatar-txt">
+                        {{ m.role === 'AI' ? 'AI' : '客' }}
+                      </span>
+                    </template>
+                  </Avatar>
+                  <span
+                    class="wb-avatar-dot"
+                    :class="m.role.toLowerCase()"
+                  ></span>
                 </div>
-                <div class="wb-msg-bubble" :class="m.role">
-                  <div class="wb-msg-text">{{ m.text }}</div>
-                  <div v-if="m.cites && m.cites.length" class="wb-msg-cites">
-                    <div class="wb-cites-title">⌁ 引用证据</div>
-                    <div class="wb-cites-list">
-                      <span v-for="c in m.cites" :key="c" class="wb-cite-tag">{{ c }}</span>
+
+                <div class="wb-msg-main">
+                  <div class="wb-msg-head">
+                    <span class="wb-msg-name">
+                      {{ m.role === 'AI' ? '客服助手' : '访客' }}
+                    </span>
+                    <span class="wb-msg-time">
+                      {{ formatTime(m.createTime) }}
+                    </span>
+                  </div>
+                  <div
+                    class="wb-msg-bubble"
+                    :class="m.role.toLowerCase()"
+                  >
+                    <!-- eslint-disable-next-line vue/no-v-html -->
+                    <div v-if="m.role === 'AI'" v-html="renderAnswer(m.content)" class="wb-msg-text"></div>
+                    <div v-else class="wb-msg-text">{{ m.content }}</div>
+                    <div
+                      v-if="
+                        m.role === 'AI' &&
+                        m.citations &&
+                        m.citations.length
+                      "
+                      class="wb-msg-cites"
+                    >
+                      <div class="wb-cites-title">⌁ 引用证据</div>
+                      <div class="wb-cites-list">
+                        <span
+                          v-for="(c, idx) in m.citations"
+                          :key="idx"
+                          class="wb-cite-tag"
+                          :title="c"
+                        >
+                          [C{{ idx + 1 }}]
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
+              </template>
+            </div>
+
+            <!-- AI 思考中占位 -->
+            <div v-if="sending" class="wb-msg">
+              <div class="wb-avatar-wrap ai">
+                <Avatar :size="40" class="wb-avatar ai">
+                  <template #icon>
+                    <span class="wb-avatar-txt">AI</span>
+                  </template>
+                </Avatar>
+                <span class="wb-avatar-dot ai"></span>
+              </div>
+              <div class="wb-msg-main">
+                <div class="wb-msg-head">
+                  <span class="wb-msg-name">客服助手</span>
+                </div>
+                <div class="wb-msg-bubble ai wb-typing-bubble">
+                  <span class="wb-typing-dot"></span>
+                  <span class="wb-typing-dot"></span>
+                  <span class="wb-typing-dot"></span>
+                  <span class="wb-typing-text">AI 思考中(10~60 秒)…</span>
+                </div>
               </div>
             </div>
-            <Empty v-if="!msgs.length" description="暂无消息" />
+
+            <Empty
+              v-if="!msgs.length && !loadingHistory && !sending"
+              description="暂无消息"
+            />
           </div>
 
           <div class="wb-input-area">
             <Input.TextArea
+              ref="inputRef"
               v-model:value="draft"
               :rows="3"
-              placeholder="输入你的问题，Enter 发送…"
+              placeholder="输入客户问题, Enter 发送…"
               @press-enter.prevent="send"
             />
             <div class="wb-input-foot">
-              <span class="wb-kb-hint">⌁ 知识库：产品手册 · v2.3</span>
-              <Button type="primary" @click="send">发送</Button>
+              <span class="wb-kb-hint">
+                {{
+                  sending
+                    ? 'AI 思考中(10~60 秒)…'
+                    : 'Enter 发送 · 回复基于知识库检索'
+                }}
+              </span>
+              <Space>
+                <Button
+                  v-if="curConv && curConv.status === 'TRANSFERRED'"
+                  :loading="takingOver"
+                  @click="handleTakeOver"
+                  v-access:code="['chat:conversation:take-over']"
+                >
+                  接管会话
+                </Button>
+                <Button
+                  :disabled="!curConv || curConv.status !== 'ACTIVE'"
+                  :loading="transferring"
+                  danger
+                  @click="handleTransfer"
+                  v-access:code="['chat:conversation:transfer']"
+                >
+                  转人工
+                </Button>
+                <Button
+                  type="primary"
+                  :loading="sending"
+                  @click="send"
+                  v-access:code="['chat:chat:send']"
+                >
+                  发送
+                </Button>
+              </Space>
             </div>
           </div>
         </Card>
@@ -223,33 +537,82 @@ function scrollBottom() {
 
       <!-- 右: 信息面板 -->
       <Col :span="6">
-        <Card title="当前检索证据" size="small" class="wb-card" style="margin-bottom: 16px">
+        <Card
+          v-if="evidenceVisible"
+          title="AI 建议 / 证据面板"
+          size="small"
+          class="wb-card"
+          style="margin-bottom: 16px"
+        >
           <div class="wb-evidence">
-            <div v-for="e in evidences" :key="e.name" class="wb-ev-card" :class="e.cls">
-              <div class="wb-ev-top">
-                <span class="wb-ev-score" :class="e.cls">{{ e.score }}</span>
-                <span class="wb-ev-name">{{ e.name }}</span>
-              </div>
-              <div class="wb-ev-section">{{ e.section }}</div>
-              <div class="wb-ev-desc">{{ e.desc }}</div>
-              <div class="wb-ev-foot">
-                <Tag :color="e.cls === 'green' ? 'green' : e.cls === 'orange' ? 'orange' : 'blue'" class="wb-ev-tag">{{ e.tag }}</Tag>
-                <span class="wb-ev-actions">
-                  <span class="wb-ev-src mono">{{ e.src }}</span>
-                  <a class="wb-ev-link">详情 ›</a>
-                </span>
-              </div>
+            <div class="wb-ev-row">
+              <span class="wb-ev-label">充分性</span>
+              <Tag :color="lastSend?.answerable ? 'green' : 'red'">
+                {{ lastSend?.answerable ? '可作答' : '已转人工' }}
+              </Tag>
+              <Tag v-if="lastSend?.transferRequired" color="red">转人工</Tag>
+            </div>
+            <div v-if="lastSend?.confidence != null" class="wb-ev-row">
+              <span class="wb-ev-label">置信度</span>
+              <span class="wb-ev-conf">
+                {{ Math.round(lastSend.confidence * 100) }}%
+              </span>
+              <Progress
+                class="wb-ev-progress"
+                :percent="
+                  Math.min(
+                    100,
+                    Math.max(0, Math.round(lastSend.confidence * 100)),
+                  )
+                "
+                size="small"
+                :status="lastSend?.answerable ? 'normal' : 'exception'"
+              />
+            </div>
+            <div v-if="lastSend?.transferReason" class="wb-ev-row">
+              <span class="wb-ev-label">转人工原因</span>
+              <span class="wb-ev-value">{{ lastSend.transferReason }}</span>
+            </div>
+            <div class="wb-ev-row">
+              <span class="wb-ev-label">引用数量</span>
+              <span class="wb-ev-value">
+                {{ lastSend?.citations?.length ?? 0 }} 条
+              </span>
+            </div>
+            <div v-if="lastSend?.traceId" class="wb-ev-row">
+              <span class="wb-ev-label">追踪号</span>
+              <span class="wb-ev-value mono">{{ lastSend.traceId }}</span>
             </div>
           </div>
         </Card>
+
         <Card title="会话信息" size="small" class="wb-card" style="margin-bottom: 16px">
           <div class="wb-kv">
-            <div><span>渠道</span><b>Web 客服</b></div>
-            <div><span>意图</span><b class="kv-warn">售后退款</b></div>
-            <div><span>轮次</span><b>{{ msgs.length }}</b></div>
-            <div><span>模型</span><b class="mono">qwen2.5-72b</b></div>
+            <div>
+              <span>状态</span>
+              <b>
+                {{
+                  curConv
+                    ? STATUS_TEXT[curConv.status]?.text || curConv.status
+                    : '-'
+                }}
+              </b>
+            </div>
+            <div><span>渠道</span><b>{{ curConv?.channel || '-' }}</b></div>
+            <div><span>客户</span><b>{{ curConv?.customerId || '-' }}</b></div>
+            <div>
+              <span>意图</span><b class="kv-warn">{{ curConv?.intent || '-' }}</b>
+            </div>
+            <div>
+              <span>客服</span><b>{{ curConv?.operatorId ?? '-' }}</b>
+            </div>
+            <div>
+              <span>创建时间</span>
+              <b class="mono">{{ formatTime(curConv?.createTime) || '-' }}</b>
+            </div>
           </div>
         </Card>
+
         <Card title="快捷指令" size="small" class="wb-card">
           <div
             v-for="q in ['查询最新订单状态', '申请售后并说明流程', '查询退换货政策']"
@@ -346,6 +709,19 @@ html.dark .wb-conv-active {
 html.dark .wb-conv-name {
   color: #e5e7eb;
 }
+.wb-conv-cust-inline {
+  font-size: 10.5px;
+  color: #94a3b8;
+}
+html.dark .wb-conv-cust-inline {
+  color: #64748b;
+}
+.wb-conv-status {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+  flex: none;
+}
 .wb-conv-time {
   font-size: 11px;
   color: #94a3b8;
@@ -374,6 +750,89 @@ html.dark .wb-conv-time {
 }
 .wb-msg.user {
   flex-direction: row-reverse;
+}
+
+/* 交接摘要卡片(聊天区顶部) */
+.wb-summary-inline {
+  flex: none;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+html.dark .wb-summary-inline {
+  background: #451a03;
+  border-color: #92400e;
+}
+.wb-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.wb-summary-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #92400e;
+}
+html.dark .wb-summary-title {
+  color: #fbbf24;
+}
+.wb-summary-tag {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.wb-summary-text {
+  font-size: 12.5px;
+  color: #78350f;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+html.dark .wb-summary-text {
+  color: #fde68a;
+}
+
+/* SYSTEM 交接消息(居中灰条) */
+.wb-msg.system {
+  justify-content: center;
+}
+.wb-msg-system {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 90%;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: #475569;
+}
+html.dark .wb-msg-system {
+  background: #1f2937;
+  border-color: #374151;
+  color: #9ca3af;
+}
+.wb-system-tag {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+  flex: none;
+}
+.wb-system-text {
+  line-height: 1.6;
+  word-break: break-word;
+}
+.wb-system-time {
+  font-size: 10px;
+  color: #94a3b8;
+  flex: none;
+}
+html.dark .wb-system-time {
+  color: #64748b;
 }
 
 /* 头像 */
@@ -488,6 +947,23 @@ html.dark .wb-msg-bubble.user {
   white-space: pre-wrap;
 }
 
+/* 内联引用角标(v-html 内容, 需 :deep) */
+.wb-msg-bubble :deep(.wb-cite-inline) {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+html.dark .wb-msg-bubble :deep(.wb-cite-inline) {
+  background: rgba(96, 165, 250, 0.18);
+  color: #93c5fd;
+}
+
 /* 气泡内引用 */
 .wb-msg-cites {
   margin-top: 12px;
@@ -522,6 +998,45 @@ html.dark .wb-cite-tag {
   border-color: #2563eb;
 }
 
+/* AI 思考中 */
+.wb-typing-bubble {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wb-typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  animation: wb-blink 1.2s infinite ease-in-out;
+}
+.wb-typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.wb-typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes wb-blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+.wb-typing-text {
+  font-size: 12px;
+  color: #64748b;
+}
+html.dark .wb-typing-text {
+  color: #94a3b8;
+}
+
 /* 输入区 */
 .wb-input-area {
   border-top: 1px solid #e2e8f0;
@@ -544,137 +1059,45 @@ html.dark .wb-kb-hint {
   color: #6b7280;
 }
 
-/* ===== 检索证据(卡片化) ===== */
+/* ===== 证据面板 ===== */
 .wb-evidence {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
-.wb-ev-card {
-  background: #ffffff;
-  border: 1.5px solid #d7dde6;
-  border-left: 4px solid #64748b;
-  border-radius: 10px;
-  padding: 12px 14px;
-  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.08);
-  transition: all 0.2s;
-}
-html.dark .wb-ev-card {
-  background: #1f2937;
-  border-color: #4b5563;
-  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.35);
-}
-.wb-ev-card.green {
-  border-left-color: #16a34a;
-}
-.wb-ev-card.orange {
-  border-left-color: #d97706;
-}
-.wb-ev-card.blue {
-  border-left-color: #2563eb;
-}
-.wb-ev-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
-}
-html.dark .wb-ev-card:hover {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
-}
-.wb-ev-top {
+.wb-ev-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  font-size: 12.5px;
 }
-.wb-ev-score {
-  font-family: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
-  font-size: 12px;
-  font-weight: 800;
-  padding: 3px 10px;
-  border-radius: 999px;
+.wb-ev-label {
   flex: none;
-  color: #fff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  width: 68px;
+  color: #94a3b8;
 }
-.wb-ev-score.green {
-  background: #16a34a;
-}
-.wb-ev-score.orange {
-  background: #d97706;
-}
-.wb-ev-score.blue {
-  background: #2563eb;
-}
-.wb-ev-name {
-  font-size: 13px;
-  font-weight: 700;
-  color: #111827;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-html.dark .wb-ev-name {
-  color: #f3f4f6;
-}
-.wb-ev-section {
-  font-size: 11px;
-  color: #2563eb;
-  margin: 4px 0 0 40px;
-  font-weight: 600;
-}
-html.dark .wb-ev-section {
-  color: #93c5fd;
-}
-.wb-ev-desc {
-  font-size: 11.5px;
-  color: #4b5563;
-  line-height: 1.55;
-  margin: 6px 0 0 40px;
-}
-html.dark .wb-ev-desc {
-  color: #9ca3af;
-}
-.wb-ev-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 8px 0 0 40px;
-  gap: 6px;
-}
-.wb-ev-tag {
-  margin: 0;
-  font-size: 10px;
-  line-height: 1.4;
-}
-.wb-ev-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.wb-ev-src {
-  font-size: 9.5px;
-  color: #9ca3af;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100px;
-}
-html.dark .wb-ev-src {
+html.dark .wb-ev-label {
   color: #6b7280;
 }
-.wb-ev-link {
-  font-size: 11px;
+.wb-ev-conf {
+  font-weight: 700;
   color: #2563eb;
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
+  flex: none;
 }
-.wb-ev-link:hover {
-  color: #1d4ed8;
-  text-decoration: underline;
-}
-html.dark .wb-ev-link {
+html.dark .wb-ev-conf {
   color: #60a5fa;
+}
+.wb-ev-progress {
+  flex: 1;
+  min-width: 0;
+}
+.wb-ev-value {
+  color: #1f2937;
+  line-height: 1.6;
+  word-break: break-word;
+}
+html.dark .wb-ev-value {
+  color: #e5e7eb;
 }
 
 /* ===== 会话信息 / 快捷指令 ===== */
@@ -702,6 +1125,13 @@ html.dark .wb-kv b {
 }
 .kv-warn {
   color: #ea580c !important;
+}
+.wb-chat-customer {
+  font-size: 11px;
+  color: #94a3b8;
+}
+html.dark .wb-chat-customer {
+  color: #6b7280;
 }
 .wb-quick {
   font-size: 12.5px;
