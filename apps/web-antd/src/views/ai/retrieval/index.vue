@@ -38,7 +38,7 @@ const evidenceResult = ref<AiEvidenceApi.EvaluateResp | null>(null);
 const expandedEvidence = ref<Set<number>>(new Set()); // 展开的证据 chunkId
 
 /** 当前视图: search=检索结果 / evidence=证据评估(两者互斥, 评估时隐藏检索结果区) */
-const activeView = ref<'search' | 'evidence'>('search');
+const activeView = ref<'evidence' | 'search'>('search');
 
 /** 被冲突引用的证据索引集合(用于红色边框高亮) */
 const conflictIndexes = computed(() => {
@@ -94,8 +94,16 @@ const INTENT_TAG: Record<string, { color: string; text: string }> = {
   OTHER: { color: 'default', text: '其他' },
 };
 
-/** 当前意图(带默认色) */
+/** 当前意图(优先知识库意图匹配结果, 兜底语义分析意图枚举) */
 const intent = computed(() => {
+  // 知识库意图匹配结果: 动态意图名称 / OUT_OF_SCOPE(超出范围)
+  const matchedIntent = result.value?.intent;
+  if (matchedIntent) {
+    return matchedIntent === 'OUT_OF_SCOPE'
+      ? { color: 'error', text: '超出知识库范围' }
+      : { color: 'default', text: matchedIntent };
+  }
+  // 兜底: 语义分析意图枚举(固定枚举映射, 未映射时显示原始值)
   const intentCode = result.value?.analysis?.intent;
   if (!intentCode) {
     return null;
@@ -254,7 +262,7 @@ function renderAnswer(answer?: string): string {
           <Tag v-if="intent" :color="intent.color">
             {{ intent.text }}
           </Tag>
-          <Tag v-if="!result.analysis.intent" color="default">未识别</Tag>
+          <Tag v-if="!intent" color="default">未识别</Tag>
           <span
             v-if="result.channels"
             class="ml-auto text-xs text-muted-foreground"
@@ -370,7 +378,6 @@ function renderAnswer(answer?: string): string {
           </Card>
         </div>
       </template>
-
       </template>
 
       <!-- 证据评估面板(独立于检索, 同输入 topK=8; 评估时覆盖检索结果区) -->

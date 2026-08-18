@@ -17,11 +17,23 @@ import { $t } from '#/locales';
 
 import { useGridColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
+import IntentManage from './modules/intent-manage.vue';
 
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: Form,
   destroyOnClose: true,
 });
+
+/** 意图管理弹窗 */
+const [IntentManageModal, intentManageModalApi] = useVbenModal({
+  connectedComponent: IntentManage,
+  destroyOnClose: true,
+});
+
+/** 打开意图管理 */
+function handleIntentManage(row: AiKnowledgeKnowledgeApi.Knowledge) {
+  intentManageModalApi.setData(row).open();
+}
 
 /** 刷新表格 */
 function handleRefresh() {
@@ -107,6 +119,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
       <DocAlert title="AI 手册" url="https://doc.iocoder.cn/ai/build/" />
     </template>
     <FormModal @success="handleRefresh" />
+    <IntentManageModal />
     <Grid table-title="AI 知识库列表">
       <template #toolbar-tools>
         <TableAction
@@ -144,6 +157,13 @@ const [Grid, gridApi] = useVbenVxeGrid({
               icon: ACTION_ICON.SEARCH,
               auth: ['ai:knowledge:query'],
               onClick: handleRetrieval.bind(null, row.id),
+            },
+            {
+              label: '意图管理',
+              type: 'link',
+              icon: 'lucide:settings',
+              auth: ['knowledge:intent:query'],
+              onClick: handleIntentManage.bind(null, row),
             },
             {
               label: $t('common.delete'),

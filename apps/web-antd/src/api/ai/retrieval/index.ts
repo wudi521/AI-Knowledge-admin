@@ -25,6 +25,8 @@ export namespace AiRetrievalApi {
   }
   export interface SearchResp {
     query: string;
+    /** 知识库意图匹配结果: 动态意图名称, 或 OUT_OF_SCOPE=超出知识库范围 */
+    intent?: string;
     analysis?: Analysis;
     channels?: ChannelStat;
     answer?: string;
@@ -36,8 +38,8 @@ export namespace AiRetrievalApi {
 
 /** 检索(混合检索 + 重排 + 权限过滤) */
 export function searchRetrieval(data: {
-  query: string;
   kbIds?: number[];
+  query: string;
   topK?: number;
 }) {
   return requestClient.post<AiRetrievalApi.SearchResp>('/retrieval/search', data);
