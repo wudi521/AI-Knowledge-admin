@@ -91,3 +91,15 @@ export function getChatConversations(params: {
     { params },
   );
 }
+
+/**
+ * 创建反馈(点赞/点踩; 点踩自动生成评测考题闭环)
+ * 权限: chat:chat:send
+ */
+export function createFeedback(data: {
+  messageId: number;
+  type: 'THUMB_UP' | 'THUMB_DOWN';
+  note?: string;
+}) {
+  return requestClient.post<number>('/chat/feedback/create', data);
+}
