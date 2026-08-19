@@ -36,11 +36,13 @@ export namespace AiRetrievalApi {
   }
 }
 
-/** 检索(混合检索 + 重排 + 权限过滤) */
+/** 检索(混合检索 + 重排 + 权限过滤; 链路含 LLM 查询分析/重排/总结, CPU 推理可达 30~90s, 默认 30s 会超时) */
 export function searchRetrieval(data: {
   kbIds?: number[];
   query: string;
   topK?: number;
 }) {
-  return requestClient.post<AiRetrievalApi.SearchResp>('/retrieval/search', data);
+  return requestClient.post<AiRetrievalApi.SearchResp>('/retrieval/search', data, {
+    timeout: 180_000,
+  });
 }
