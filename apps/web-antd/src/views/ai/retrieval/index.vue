@@ -233,7 +233,11 @@ function renderAnswer(answer?: string): string {
         </span>
       </div>
 
-      <!-- 检索结果区(与证据评估同屏: 上=检索结果, 下=证据评估判定) -->
+      <!-- 左右同屏: 左=检索结果, 右=证据评估判定 -->
+      <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <!-- 左列: 检索结果 -->
+        <div class="flex min-w-0 flex-col gap-4">
+      <!-- 检索结果区 -->
       <!-- 分析区 -->
       <div
         v-if="result?.analysis"
@@ -360,8 +364,11 @@ function renderAnswer(answer?: string): string {
           </Card>
         </div>
       </template>
+        </div><!-- /左列: 检索结果 -->
 
-      <!-- 证据评估判定面板(与检索结果同屏展示: 充分性/冲突/Claim/回答) -->
+        <!-- 右列: 证据评估判定 -->
+        <div class="flex min-w-0 flex-col gap-4">
+      <!-- 证据评估判定面板(充分性/冲突/Claim/回答) -->
       <Card
         v-if="evidenceResult"
         size="small"
@@ -571,6 +578,8 @@ function renderAnswer(answer?: string): string {
           </div>
         </div>
       </Card>
+        </div><!-- /右列: 证据评估判定 -->
+      </div><!-- /左右同屏 grid -->
     </div>
   </Page>
 </template>
