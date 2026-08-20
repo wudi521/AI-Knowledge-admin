@@ -18,6 +18,7 @@ import { $t } from '#/locales';
 import { useGridColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
 import IntentManage from './modules/intent-manage.vue';
+import SlotManage from './modules/slot-manage.vue';
 
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: Form,
@@ -33,6 +34,17 @@ const [IntentManageModal, intentManageModalApi] = useVbenModal({
 /** 打开意图管理 */
 function handleIntentManage(row: AiKnowledgeKnowledgeApi.Knowledge) {
   intentManageModalApi.setData(row).open();
+}
+
+/** 槽位管理弹窗 */
+const [SlotManageModal, slotManageModalApi] = useVbenModal({
+  connectedComponent: SlotManage,
+  destroyOnClose: true,
+});
+
+/** 打开槽位管理 */
+function handleSlotManage(row: AiKnowledgeKnowledgeApi.Knowledge) {
+  slotManageModalApi.setData(row).open();
 }
 
 /** 刷新表格 */
@@ -120,6 +132,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     </template>
     <FormModal @success="handleRefresh" />
     <IntentManageModal />
+    <SlotManageModal />
     <Grid table-title="AI 知识库列表">
       <template #toolbar-tools>
         <TableAction
@@ -164,6 +177,13 @@ const [Grid, gridApi] = useVbenVxeGrid({
               icon: 'lucide:settings',
               auth: ['knowledge:intent:query'],
               onClick: handleIntentManage.bind(null, row),
+            },
+            {
+              label: '槽位管理',
+              type: 'link',
+              icon: 'lucide:list-checks',
+              auth: ['knowledge:kb-slot:query'],
+              onClick: handleSlotManage.bind(null, row),
             },
             {
               label: $t('common.delete'),
