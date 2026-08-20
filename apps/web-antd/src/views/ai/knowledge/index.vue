@@ -21,6 +21,8 @@ const router = useRouter();
 import { CHUNK_STRATEGY_TEXT, useGridColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
 import EvalManage from './knowledge/modules/eval-manage.vue';
+import IntentManage from './knowledge/modules/intent-manage.vue';
+import SlotManage from './knowledge/modules/slot-manage.vue';
 
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: Form,
@@ -41,6 +43,28 @@ const [EvalManageModal, evalManageModalApi] = useVbenModal({
 /** 打开评测管理 */
 function handleEvalManage(row: KnowledgeApi.KnowledgeBase) {
   evalManageModalApi.setData(row).open();
+}
+
+/** 意图管理弹窗 */
+const [IntentManageModal, intentManageModalApi] = useVbenModal({
+  connectedComponent: IntentManage,
+  destroyOnClose: true,
+});
+
+/** 打开意图管理 */
+function handleIntentManage(row: KnowledgeApi.KnowledgeBase) {
+  intentManageModalApi.setData(row).open();
+}
+
+/** 槽位管理弹窗 */
+const [SlotManageModal, slotManageModalApi] = useVbenModal({
+  connectedComponent: SlotManage,
+  destroyOnClose: true,
+});
+
+/** 打开槽位管理 */
+function handleSlotManage(row: KnowledgeApi.KnowledgeBase) {
+  slotManageModalApi.setData(row).open();
 }
 
 /** 新增知识库 */
@@ -100,6 +124,8 @@ const [Grid, gridApi] = useVbenVxeGrid({
   <Page auto-content-height>
     <FormModal @success="handleRefresh" />
     <EvalManageModal />
+    <IntentManageModal />
+    <SlotManageModal />
     <Grid table-title="知识库列表">
       <template #toolbar-tools>
         <TableAction
@@ -137,6 +163,18 @@ const [Grid, gridApi] = useVbenVxeGrid({
                   path: '/ai/retrieval',
                   query: { kbId: row.id },
                 }),
+            },
+            {
+              label: '意图管理',
+              icon: 'lucide:settings',
+              auth: ['knowledge:intent:query'],
+              onClick: () => handleIntentManage(row),
+            },
+            {
+              label: '槽位管理',
+              icon: 'lucide:list-checks',
+              auth: ['knowledge:kb-slot:query'],
+              onClick: () => handleSlotManage(row),
             },
             {
               label: '评测',
