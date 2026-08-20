@@ -136,3 +136,14 @@ export function getEvalTaskResults(taskId: number) {
     `/eval/task/results?taskId=${taskId}`,
   );
 }
+
+/** 从知识库已发布内容自动生成评测用例(该库已有≥5个用例时跳过; 约 20~60 秒) */
+export function generateEvalCases(kbId: number) {
+  return requestClient.post<number>(
+    `/eval/case/generate?kbId=${kbId}`,
+    undefined,
+    {
+      timeout: 180_000,
+    },
+  );
+}

@@ -19,6 +19,7 @@ import { useGridColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
 import IntentManage from './modules/intent-manage.vue';
 import SlotManage from './modules/slot-manage.vue';
+import EvalManage from './modules/eval-manage.vue';
 
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: Form,
@@ -45,6 +46,17 @@ const [SlotManageModal, slotManageModalApi] = useVbenModal({
 /** 打开槽位管理 */
 function handleSlotManage(row: AiKnowledgeKnowledgeApi.Knowledge) {
   slotManageModalApi.setData(row).open();
+}
+
+/** 评测管理弹窗 */
+const [EvalManageModal, evalManageModalApi] = useVbenModal({
+  connectedComponent: EvalManage,
+  destroyOnClose: true,
+});
+
+/** 打开评测管理 */
+function handleEvalManage(row: AiKnowledgeKnowledgeApi.Knowledge) {
+  evalManageModalApi.setData(row).open();
 }
 
 /** 刷新表格 */
@@ -133,6 +145,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     <FormModal @success="handleRefresh" />
     <IntentManageModal />
     <SlotManageModal />
+    <EvalManageModal />
     <Grid table-title="AI 知识库列表">
       <template #toolbar-tools>
         <TableAction
@@ -184,6 +197,13 @@ const [Grid, gridApi] = useVbenVxeGrid({
               icon: 'lucide:list-checks',
               auth: ['knowledge:kb-slot:query'],
               onClick: handleSlotManage.bind(null, row),
+            },
+            {
+              label: '评测',
+              type: 'link',
+              icon: 'lucide:clipboard-check',
+              auth: ['eval:task:run'],
+              onClick: handleEvalManage.bind(null, row),
             },
             {
               label: $t('common.delete'),
