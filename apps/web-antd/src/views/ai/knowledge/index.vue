@@ -20,7 +20,7 @@ const router = useRouter();
 
 import { CHUNK_STRATEGY_TEXT, useGridColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
-import EvalManage from './modules/eval-manage.vue';
+import EvalManage from '../knowledge/modules/eval-manage.vue';
 
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: Form,
