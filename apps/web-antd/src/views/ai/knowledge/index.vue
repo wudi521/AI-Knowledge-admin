@@ -20,6 +20,7 @@ const router = useRouter();
 
 import { CHUNK_STRATEGY_TEXT, useGridColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
+import EvalManage from './modules/eval-manage.vue';
 
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: Form,
@@ -29,6 +30,17 @@ const [FormModal, formModalApi] = useVbenModal({
 /** 刷新表格 */
 function handleRefresh() {
   gridApi.query();
+}
+
+/** 评测管理弹窗 */
+const [EvalManageModal, evalManageModalApi] = useVbenModal({
+  connectedComponent: EvalManage,
+  destroyOnClose: true,
+});
+
+/** 打开评测管理 */
+function handleEvalManage(row: KnowledgeApi.KnowledgeBase) {
+  evalManageModalApi.setData(row).open();
 }
 
 /** 新增知识库 */
@@ -87,6 +99,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
 <template>
   <Page auto-content-height>
     <FormModal @success="handleRefresh" />
+    <EvalManageModal />
     <Grid table-title="知识库列表">
       <template #toolbar-tools>
         <TableAction
@@ -124,6 +137,12 @@ const [Grid, gridApi] = useVbenVxeGrid({
                   path: '/ai/retrieval',
                   query: { kbId: row.id },
                 }),
+            },
+            {
+              label: '评测',
+              icon: 'lucide:clipboard-check',
+              auth: ['eval:task:run'],
+              onClick: () => handleEvalManage(row),
             },
             {
               label: '删除',
