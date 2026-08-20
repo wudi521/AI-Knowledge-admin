@@ -164,7 +164,7 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
     },
     {
       title: '操作',
-      width: 280,
+      width: 500,
       fixed: 'right',
       slots: { default: 'actions' },
     },
