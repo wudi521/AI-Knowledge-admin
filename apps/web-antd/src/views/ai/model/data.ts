@@ -34,6 +34,23 @@ export function useFormSchema(): VbenFormSchema[] {
       rules: 'required',
     },
     {
+      fieldName: 'scenario',
+      label: '场景标识',
+      component: 'Input',
+      componentProps: {
+        placeholder: '如 A/B; *=默认场景',
+        clearable: true,
+      },
+      defaultValue: '*',
+    },
+    {
+      fieldName: 'priority',
+      label: '降级优先级',
+      component: 'InputNumber',
+      componentProps: { placeholder: '小者优先', min: 0 },
+      defaultValue: 0,
+    },
+    {
       fieldName: 'provider',
       label: '供应商',
       component: 'Select',
@@ -126,6 +143,17 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       title: '类型',
       width: 100,
       slots: { default: 'type' },
+    },
+    {
+      field: 'scenario',
+      title: '场景标识',
+      width: 100,
+      showOverflow: true,
+    },
+    {
+      field: 'priority',
+      title: '降级优先级',
+      width: 100,
     },
     {
       field: 'provider',

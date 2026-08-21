@@ -8,6 +8,10 @@ export namespace ModelApi {
     id?: number;
     name: string;
     type: string;
+    /** 场景标识，如 A/B；* 表示默认场景 */
+    scenario?: string;
+    /** 降级优先级，小者优先 */
+    priority?: number;
     provider?: string;
     modelName: string;
     baseUrl?: string;
