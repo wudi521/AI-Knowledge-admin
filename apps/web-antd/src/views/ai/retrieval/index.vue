@@ -303,21 +303,6 @@ function renderAnswer(answer?: string): string {
         </div>
       </Card>
 
-      <!-- AI 总结 -->
-      <Card v-if="result?.answer && !result?.answerBlocked" size="small" class="border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/20">
-        <div class="mb-1 flex items-center gap-2">
-          <span class="text-sm font-bold">AI 总结</span>
-          <Tag color="blue">基于检索结果生成</Tag>
-        </div>
-        <div
-          class="whitespace-pre-wrap leading-6 text-card-foreground"
-          v-html="renderAnswer(result.answer)"
-        ></div>
-        <div class="mt-1 text-xs text-muted-foreground">
-          引用编号 [C1][C2]… 对应下方结果卡片顺序
-        </div>
-      </Card>
-
       <!-- 结果区 -->
       <template v-if="result">
         <div v-if="result.results.length === 0" class="py-10 text-center text-muted-foreground">
@@ -389,6 +374,9 @@ function renderAnswer(answer?: string): string {
             >
               耗时 {{ evidenceResult.elapsedMs }} ms
             </span>
+          </div>
+          <div class="mt-1 text-xs text-muted-foreground">
+            答案统一由证据管线生成(检索召回 + 充分性判定 + Claim 逐句验证), 与对话工作台同链路
           </div>
           <div
             v-if="evidenceResult.query"
