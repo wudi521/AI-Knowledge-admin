@@ -1,6 +1,5 @@
 <script lang="ts" setup>
 import type { AiEvidenceApi } from '#/api/ai/evidence';
-import type { AiRetrievalApi } from '#/api/ai/retrieval';
 
 import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
@@ -20,7 +19,6 @@ import {
 
 import { evaluateEvidence } from '#/api/ai/evidence';
 import { getKnowledgeBasePage } from '#/api/ai/knowledge';
-import { searchRetrieval } from '#/api/ai/retrieval';
 
 defineOptions({ name: 'AiRetrieval' });
 
@@ -30,10 +28,8 @@ const route = useRoute();
 const query = ref('');
 const kbIds = ref<number[]>([]); // 选中的知识库(空 = 全部可见)
 const loading = ref(false);
-const result = ref<AiRetrievalApi.SearchResp | null>(null);
 
-/** 证据评估(与检索并行, 同屏展示: 上=检索结果, 下=证据评估判定) */
-const evaluating = ref(false);
+/** 证据评估(单接口: 内部含检索+判定+生成, 双回答者收敛后答案与检索诊断均由评估响应透传) */
 const evidenceResult = ref<AiEvidenceApi.EvaluateResp | null>(null);
 const expandedEvidence = ref<Set<number>>(new Set()); // 展开的证据 chunkId
 
@@ -91,21 +87,16 @@ const INTENT_TAG: Record<string, { color: string; text: string }> = {
   OTHER: { color: 'default', text: '其他' },
 };
 
-/** 当前意图(优先知识库意图匹配结果, 兜底语义分析意图枚举) */
+/** 当前意图(评估响应透传的语义分析意图: 知识库意图名 / 固定枚举 / OUT_OF_SCOPE) */
 const intent = computed(() => {
-  // 知识库意图匹配结果: 动态意图名称 / OUT_OF_SCOPE(超出范围)
-  const matchedIntent = result.value?.intent;
-  if (matchedIntent) {
-    return matchedIntent === 'OUT_OF_SCOPE'
-      ? { color: 'error', text: '超出知识库范围' }
-      : { color: 'default', text: matchedIntent };
-  }
-  // 兜底: 语义分析意图枚举(固定枚举映射, 未映射时显示原始值)
-  const intentCode = result.value?.analysis?.intent;
-  if (!intentCode) {
+  const matchedIntent = evidenceResult.value?.analysis?.intent;
+  if (!matchedIntent) {
     return null;
   }
-  return INTENT_TAG[intentCode] || { color: 'default', text: intentCode };
+  if (matchedIntent === 'OUT_OF_SCOPE') {
+    return { color: 'error', text: '超出知识库范围' };
+  }
+  return INTENT_TAG[matchedIntent] || { color: 'default', text: matchedIntent };
 });
 
 /** 通道徽标颜色 */
@@ -115,7 +106,7 @@ const CHANNEL_COLOR: Record<string, string> = {
   fused: 'purple',
 };
 
-/** 检索 + 证据评估(并行执行, 同屏展示: 检索结果列表 + 充分性判定/冲突/Claim/回答) */
+/** 证据评估(单接口: 内部含检索召回+判定+生成; 双回答者收敛后检索诊断由评估响应透传) */
 async function handleSearch() {
   const keyword = query.value.trim();
   if (!keyword) {
@@ -123,8 +114,6 @@ async function handleSearch() {
     return;
   }
   loading.value = true;
-  evaluating.value = true;
-  result.value = null;
   evidenceResult.value = null;
   expandedEvidence.value = new Set();
   const params = {
@@ -132,18 +121,11 @@ async function handleSearch() {
     kbIds: kbIds.value.length > 0 ? kbIds.value : undefined,
   };
   try {
-    // 并行: 检索(topK=5)与证据评估(topK=8, 内部含检索+判定+生成)同时发起, 谁先到谁先渲染
-    const [searchResp, evaluateResp] = await Promise.all([
-      searchRetrieval({ ...params, topK: 5 }),
-      evaluateEvidence({ ...params, topK: 8 }),
-    ]);
-    result.value = searchResp;
-    evidenceResult.value = evaluateResp;
+    evidenceResult.value = await evaluateEvidence({ ...params, topK: 8 });
   } catch {
     message.error('检索/评估失败');
   } finally {
     loading.value = false;
-    evaluating.value = false;
   }
 }
 /** HTML 转义(先转义再高亮, 防 XSS) */
@@ -154,32 +136,6 @@ function escapeHtml(text: string): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
-}
-
-/** 高亮: 先转义 HTML, 再把命中 token 包进 <mark> */
-function highlightHtml(text?: string, keyword?: string): string {
-  const safe = escapeHtml(text || '');
-  const tokens = (keyword || '')
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter(Boolean);
-  let html = safe;
-  for (const token of tokens) {
-    const escapedToken = escapeHtml(token);
-    if (!escapedToken) {
-      continue;
-    }
-    const regex = new RegExp(
-      escapedToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-      'gi',
-    );
-    html = html.replace(
-      regex,
-      (match) =>
-        `<mark class="bg-yellow-200 px-0.5 rounded dark:bg-yellow-600/40">${match}</mark>`,
-    );
-  }
-  return html;
 }
 
 /** 分数保留 2 位 */
@@ -220,28 +176,23 @@ function renderAnswer(answer?: string): string {
         />
         <Button
           type="primary"
-          :loading="loading || evaluating"
+          :loading="loading"
           @click="handleSearch"
         >
-          检索
+          检索评估
         </Button>
         <span
-          v-if="evaluating"
+          v-if="loading"
           class="text-xs text-muted-foreground"
         >
-          评估中…含多轮 AI 判定, 约需 10~60 秒
+          评估中…含检索+判定+多轮 AI 验证, 约需 10~60 秒
         </span>
       </div>
 
-      <!-- 左右同屏: 左=检索结果, 右=证据评估判定 -->
-      <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <!-- 左列: 检索结果 -->
-        <div class="flex min-w-0 flex-col gap-4">
-      <!-- 检索结果区 -->
-      <!-- 分析区 -->
+      <!-- 检索诊断区(意图/实体/改写/子问题/通道统计; 评估响应透传) -->
       <div
-        v-if="result?.analysis"
-        class="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4"
+        v-if="evidenceResult?.analysis || evidenceResult?.channels"
+        class="mb-4 flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4"
       >
         <div class="flex flex-wrap items-center gap-2">
           <span class="text-sm text-muted-foreground">意图:</span>
@@ -250,110 +201,57 @@ function renderAnswer(answer?: string): string {
           </Tag>
           <Tag v-if="!intent" color="default">未识别</Tag>
           <span
-            v-if="result.channels"
+            v-if="evidenceResult?.channels"
             class="ml-auto text-xs text-muted-foreground"
           >
-            通道统计: BM25 召回 {{ result.channels.bm25 ?? 0 }} /
-            向量召回 {{ result.channels.vector ?? 0 }} /
-            融合 {{ result.channels.fused ?? 0 }}
+            通道统计: BM25 召回 {{ evidenceResult.channels.bm25 ?? 0 }} /
+            向量召回 {{ evidenceResult.channels.vector ?? 0 }} /
+            融合 {{ evidenceResult.channels.fused ?? 0 }}
           </span>
         </div>
-        <div v-if="result.analysis.entities?.length" class="flex flex-wrap items-center gap-2">
+        <div v-if="evidenceResult?.analysis?.entities?.length" class="flex flex-wrap items-center gap-2">
           <span class="text-sm text-muted-foreground">实体:</span>
-          <Tag v-for="entity in result.analysis.entities" :key="entity">
+          <Tag v-for="entity in evidenceResult.analysis.entities" :key="entity">
             {{ entity }}
           </Tag>
         </div>
-        <div v-if="result.analysis.rewrites?.length" class="flex flex-wrap items-center gap-2">
+        <div v-if="evidenceResult?.analysis?.rewrites?.length" class="flex flex-wrap items-center gap-2">
           <span class="text-sm text-muted-foreground">改写变体:</span>
-          <Tag v-for="rewrite in result.analysis.rewrites" :key="rewrite" color="processing">
+          <Tag v-for="rewrite in evidenceResult.analysis.rewrites" :key="rewrite" color="processing">
             {{ rewrite }}
           </Tag>
         </div>
         <div
-          v-if="result.analysis.subQuestions?.length"
+          v-if="evidenceResult?.analysis?.subQuestions?.length"
           class="flex flex-wrap items-center gap-2"
         >
           <span class="text-sm text-muted-foreground">子问题:</span>
-          <Tag v-for="question in result.analysis.subQuestions" :key="question" color="cyan">
+          <Tag v-for="question in evidenceResult.analysis.subQuestions" :key="question" color="cyan">
             {{ question }}
           </Tag>
         </div>
         <div
-          v-if="!result.analysis.success"
+          v-if="evidenceResult?.analysis && !evidenceResult.analysis.success"
           class="text-xs text-muted-foreground"
         >
           语义分析未成功, 已直接走关键词检索
         </div>
       </div>
 
-      <!-- 产品不匹配拒绝作答(结构化门禁) -->
+      <!-- 产品不匹配拒绝作答(结构化门禁, 评估响应透传) -->
       <Card
-        v-if="result?.answerBlocked"
+        v-if="evidenceResult && evidenceResult.answerable === false && (evidenceResult.refusalReason || '').includes('产品')"
         size="small"
-        class="border-red-500/50 bg-red-50/60 dark:bg-red-950/20"
+        class="mb-4 border-red-500/50 bg-red-50/60 dark:bg-red-950/20"
       >
         <div class="mb-1 flex items-center gap-2">
           <span class="text-sm font-bold">无法回答</span>
           <Tag color="error">产品/品牌不匹配</Tag>
         </div>
-        <div class="leading-6 text-card-foreground">{{ result.answerReason }}</div>
-        <div class="mt-1 text-xs text-muted-foreground">
-          下方为检索到的相关片段(仅作参考, 未确认适用于您的问题)
-        </div>
+        <div class="leading-6 text-card-foreground">{{ evidenceResult.refusalReason }}</div>
       </Card>
 
-      <!-- 结果区 -->
-      <template v-if="result">
-        <div v-if="result.results.length === 0" class="py-10 text-center text-muted-foreground">
-          未检索到已发布且可见的内容
-        </div>
-        <div v-else class="flex flex-col gap-3">
-          <Card
-            v-for="item in result.results"
-            :key="item.chunkId"
-            size="small"
-            class="border-border"
-          >
-            <template #title>
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="font-mono text-sm">#{{ item.chunkId }}</span>
-                <span class="font-medium">{{ item.documentName || '-' }}</span>
-                <Tag v-if="item.versionNo" color="default">
-                  {{ item.versionNo }}
-                </Tag>
-                <span class="ml-auto text-sm text-muted-foreground">
-                  重排分 {{ formatScore(item.rerankScore) }}
-                </span>
-              </div>
-            </template>
-            <div class="flex flex-col gap-2">
-              <!-- eslint-disable-next-line vue/no-v-html -->
-              <div
-                v-html="highlightHtml(item.content, result.query)"
-                class="whitespace-pre-wrap break-all text-sm leading-6"
-              ></div>
-              <div class="flex items-center gap-2 text-xs text-muted-foreground">
-                <span>RRF 融合分 {{ formatScore(item.rrfScore) }}</span>
-                <span class="ml-auto flex items-center gap-1">
-                  <Tag
-                    v-for="channel in item.channels || []"
-                    :key="channel"
-                    :color="CHANNEL_COLOR[channel] || 'default'"
-                  >
-                    {{ channel }}
-                  </Tag>
-                </span>
-              </div>
-            </div>
-          </Card>
-        </div>
-      </template>
-        </div><!-- /左列: 检索结果 -->
-
-        <!-- 右列: 证据评估判定 -->
-        <div class="flex min-w-0 flex-col gap-4">
-      <!-- 证据评估判定面板(充分性/冲突/Claim/回答) -->
+      <!-- 证据评估判定面板(单列) -->
       <Card
         v-if="evidenceResult"
         size="small"
@@ -566,8 +464,6 @@ function renderAnswer(answer?: string): string {
           </div>
         </div>
       </Card>
-        </div><!-- /右列: 证据评估判定 -->
-      </div><!-- /左右同屏 grid -->
     </div>
   </Page>
 </template>

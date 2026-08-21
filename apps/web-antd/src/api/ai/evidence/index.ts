@@ -19,6 +19,20 @@ export namespace AiEvidenceApi {
     verdict: 'SUPPORTED' | 'UNSUPPORTED';
     evidenceIndex: number;
   }
+  /** 语义分析详情(检索透传, 供检索诊断) */
+  export interface AnalysisInfo {
+    intent?: null | string;
+    entities?: string[];
+    rewrites?: string[];
+    subQuestions?: string[];
+    success?: boolean | null;
+  }
+  /** 通道召回统计(检索透传) */
+  export interface ChannelStat {
+    bm25?: null | number;
+    vector?: null | number;
+    fused?: null | number;
+  }
   export interface EvaluateResp {
     traceId: string;
     query: string;
@@ -32,6 +46,8 @@ export namespace AiEvidenceApi {
     claims: ClaimItem[] | null;
     claimFail: boolean | null;
     elapsedMs: null | number;
+    analysis?: null | AnalysisInfo; // 语义分析详情(意图/实体/改写/子问题)
+    channels?: null | ChannelStat; // 通道召回统计(BM25/向量/融合)
   }
 }
 
