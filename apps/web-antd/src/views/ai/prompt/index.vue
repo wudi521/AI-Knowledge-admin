@@ -143,10 +143,28 @@ function handleCreate() {
   formModalApi.setData(null).open();
 }
 
-/** 编辑(仅停用版本) */
-function handleEdit(row: AiPromptApi.Prompt) {
+/**
+ * 编辑:
+ * - 停用版本: 直接打开编辑表单
+ * - 启用/灰度版本: 自动复制为同 key 新版本草稿(status=0)再打开编辑,
+ *   保存后为停用草稿, 可"启用"或"灰度设置"发布(运行中版本不可原地修改)
+ */
+async function handleEdit(row: AiPromptApi.Prompt) {
   if (row.status !== 0) {
-    message.warning('仅可编辑停用版本');
+    try {
+      const newId = await createPrompt({
+        promptKey: row.promptKey,
+        name: row.name,
+        description: row.description,
+        content: row.content,
+      });
+      message.success(
+        `已复制为「${row.promptKey}」新版本草稿(v${row.version + 1}), 修改后请启用或灰度发布`,
+      );
+      formModalApi.setData({ ...row, id: newId, status: 0, version: row.version + 1 } as AiPromptApi.Prompt).open();
+    } catch {
+      // 创建失败
+    }
     return;
   }
   formModalApi.setData(row).open();
@@ -545,7 +563,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
               type: 'link',
               icon: ACTION_ICON.EDIT,
               auth: ['model:prompt:update'],
-              ifShow: () => row.status === 0,
+              // 停用版本直接编辑; 启用/灰度版本点击后自动复制为新版本草稿再编辑
               onClick: () => handleEdit(row),
             },
             {
