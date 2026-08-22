@@ -5,11 +5,14 @@ const TYPE_OPTIONS = [
   { label: '对话 (chat)', value: 'chat' },
   { label: '向量 (embedding)', value: 'embedding' },
   { label: '重排 (rerank)', value: 'rerank' },
+  { label: '视觉 (image)', value: 'image' },
 ];
 
 const PROVIDER_OPTIONS = [
   { label: 'OLLAMA(本地)', value: 'OLLAMA' },
   { label: 'XINFERENCE(本地)', value: 'XINFERENCE' },
+  { label: 'LM_STUDIO(本地)', value: 'LM_STUDIO' },
+  { label: 'LLAMA_CPP(本地)', value: 'LLAMA_CPP' },
   { label: 'OPENAI', value: 'OPENAI' },
   { label: 'ALIYUN', value: 'ALIYUN' },
   { label: 'DEEPSEEK', value: 'DEEPSEEK' },
@@ -77,13 +80,28 @@ export function useFormSchema(): VbenFormSchema[] {
       fieldName: 'apiKey',
       label: 'API 密钥',
       component: 'Input',
-      componentProps: { placeholder: '云 API 需要，本地模型可空', clearable: true },
+      componentProps: {
+        placeholder: '云 API 需要，本地模型可空；编辑时留空表示不修改',
+        clearable: true,
+      },
     },
     {
       fieldName: 'dimensions',
       label: '向量维度',
       component: 'InputNumber',
       componentProps: { placeholder: 'embedding 类型填写', min: 0 },
+    },
+    {
+      fieldName: 'inPerMtok',
+      label: '输入单价(元/百万token)',
+      component: 'InputNumber',
+      componentProps: { placeholder: '成本估算用, 可不填', min: 0, precision: 4 },
+    },
+    {
+      fieldName: 'outPerMtok',
+      label: '输出单价(元/百万token)',
+      component: 'InputNumber',
+      componentProps: { placeholder: '成本估算用, 可不填', min: 0, precision: 4 },
     },
     {
       fieldName: 'status',
@@ -170,6 +188,18 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       field: 'dimensions',
       title: '维度',
       width: 80,
+    },
+    {
+      field: 'inPerMtok',
+      title: '输入价',
+      width: 100,
+      formatter: 'formatNumber',
+    },
+    {
+      field: 'outPerMtok',
+      title: '输出价',
+      width: 100,
+      formatter: 'formatNumber',
     },
     {
       field: 'status',

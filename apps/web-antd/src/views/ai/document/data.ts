@@ -74,12 +74,6 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       slots: { default: 'chunkStrategy' },
     },
     {
-      field: 'embedModel',
-      title: 'Embedding 模型',
-      width: 120,
-      showOverflow: true,
-    },
-    {
       field: 'type',
       title: '类型',
       width: 90,

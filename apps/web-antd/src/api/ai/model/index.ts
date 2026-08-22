@@ -17,6 +17,10 @@ export namespace ModelApi {
     baseUrl?: string;
     apiKey?: string;
     dimensions?: number;
+    /** 输入单价(每百万token, 元; 成本估算用) */
+    inPerMtok?: number;
+    /** 输出单价(每百万token, 元) */
+    outPerMtok?: number;
     status?: number;
     remark?: string;
     createTime?: string;

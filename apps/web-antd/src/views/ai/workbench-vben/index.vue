@@ -15,6 +15,7 @@ import {
   message,
   Progress,
   Row,
+  Select,
   Space,
   Tag,
 } from 'ant-design-vue';
@@ -29,6 +30,10 @@ import {
 
 // ===== 会话列表 =====
 const conversations = ref<AiChatApi.Conversation[]>([]);
+/** 知识库选择(专利 MVP: 必须选择一个; 单选) */
+const kbOptions = ref<{ id: number; name: string; domainCode?: string }[]>([]);
+const selectedKbId = ref<null | number>(null);
+const kbLoading = ref(false);
 const loadingList = ref(false);
 const curId = ref<null | number>(null);
 const curConv = computed(
@@ -189,9 +194,43 @@ function newChat() {
 }
 
 // ===== 发送 =====
+/** 加载知识库选项(单选; 仅启用中) */
+async function loadKbOptions() {
+  kbLoading.value = true;
+  try {
+    const { getKnowledgeBasePage } = await import('#/api/ai/knowledge');
+    const page = await getKnowledgeBasePage({ pageNo: 1, pageSize: 100 });
+    kbOptions.value = (page.list || []).map((kb: any) => ({
+      id: kb.id,
+      name: kb.name,
+      domainCode: kb.domainCode,
+    }));
+  } catch {
+    kbOptions.value = [];
+  } finally {
+    kbLoading.value = false;
+  }
+}
+
+/** 解析片段元数据 JSON(来源卡片字段: applicationNo/publicationNo/sectionType/claimNo/pageStart) */
+function evMeta(ev: any, key: string): any {
+  if (!ev?.chunkMetadata) return null;
+  try {
+    const m = JSON.parse(ev.chunkMetadata);
+    return m[key] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function send() {
   const text = draft.value.trim();
   if (!text || sending.value) return;
+  // 专利 MVP: 必须选择知识库(未选禁止发送, 后端也会拒绝全库检索)
+  if (!selectedKbId.value) {
+    message.warning('请先选择要查询的知识库(专利 MVP 一次选择一个)');
+    return;
+  }
   sending.value = true;
   // 本地先展示客户消息(不等后端)
   msgs.value.push({
@@ -207,6 +246,7 @@ async function send() {
       conversationId: curId.value || undefined,
       message: text,
       channel: 'WEB',
+      kbIds: selectedKbId.value ? [selectedKbId.value] : undefined,
     });
     lastSend.value = resp;
     // 新建会话: 更新当前会话编号并让新会话进入列表
@@ -234,6 +274,7 @@ async function send() {
         role: 'AI',
         content: resp.reply,
         citations: (resp.citations || []).map(String),
+        evidenceList: resp.evidenceList || undefined,
         confidence: resp.confidence ?? undefined,
         traceId: resp.traceId ?? undefined,
         createTime: Date.now(),
@@ -290,6 +331,7 @@ async function handleTakeOver() {
 }
 
 onMounted(async () => {
+  await loadKbOptions(); // 专利 MVP: 知识库选择器
   await loadConversations();
   // 自动选中第一个会话(TRANSFERRED 优先置顶)
   const first = sortedConversations.value[0];
@@ -307,6 +349,14 @@ onMounted(async () => {
         <p class="wb-page-desc">会话接待 / 知识引用 / 人工转接 · 已接入真实 API</p>
       </div>
       <Space>
+        <Select
+          v-model:value="selectedKbId"
+          :options="kbOptions.map((kb) => ({ label: kb.name + (kb.domainCode === 'PATENT' ? ' [专利]' : ''), value: kb.id }))"
+          placeholder="选择知识库(专利问答模式)"
+          style="width: 260px"
+          :loading="kbLoading"
+          allow-clear
+        />
         <Tag color="blue">Qwen2.5-72B</Tag>
         <Button type="primary" @click="newChat">＋ 新建会话</Button>
       </Space>
@@ -451,6 +501,23 @@ onMounted(async () => {
                         >
                           [C{{ idx + 1 }}]
                         </span>
+                      </div>
+                    </div>
+                    <!-- 专利来源卡片 -->
+                    <div v-if="m.evidenceList && m.evidenceList.length" class="wb-ev-cards">
+                      <div v-for="(ev, ei) in m.evidenceList" :key="ei" class="wb-ev-card">
+                        <div class="wb-ev-card-title">
+                          {{ ev.documentName || ('依据 ' + (ei + 1)) }}
+                          <span v-if="ev.versionNo" class="wb-ev-card-ver">v{{ ev.versionNo }}</span>
+                        </div>
+                        <div class="wb-ev-card-meta">
+                          <span v-if="evMeta(ev, 'publicationNo')">公布号：{{ evMeta(ev, 'publicationNo') }}</span>
+                          <span v-if="evMeta(ev, 'applicationNo')">申请号：{{ evMeta(ev, 'applicationNo') }}</span>
+                          <span v-if="evMeta(ev, 'sectionTitle')">章节：{{ evMeta(ev, 'sectionTitle') }}</span>
+                          <span v-if="evMeta(ev, 'claimNo')">权利要求：{{ evMeta(ev, 'claimNo') }}</span>
+                          <span v-if="evMeta(ev, 'pageStart') > 0">页码：第 {{ evMeta(ev, 'pageStart') }} 页</span>
+                        </div>
+                        <div v-if="ev.content" class="wb-ev-card-quote">“{{ ev.content }}”</div>
                       </div>
                     </div>
                   </div>

@@ -10,7 +10,7 @@ import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
-import { Button, Tag, Upload, message } from 'ant-design-vue';
+import { Button, Select, Tag, Upload, message } from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import type { ActionItem } from '#/adapter/vxe-table';
@@ -87,6 +87,7 @@ async function handleUploadFile(file: File) {
       type: getDocType(file.name),
       storagePath: url,
       fileHash,
+      chunkStrategy: chunkStrategy.value,
     });
     message.success({ content: `「${file.name}」已登记入库(待解析)`, key: 'upload' });
     // 全量刷新一次以显示新行, 之后只对该行做原位状态轮询(不整页刷新)
@@ -121,12 +122,22 @@ function downloadDocument(row: KnowledgeDocument) {
 
 /** 切分策略 → 中文 */
 const CHUNK_STRATEGY_TEXT: Record<string, string> = {
-  Semantic: '语义切分',
-  ParentChild: '父子切分',
-  Table: '表格切分',
-  FAQ: '问答切分',
-  Policy: '条款切分',
+  auto: '自动选择',
+  structure: '结构切分',
+  'parent-child': '父子切分',
+  semantic: '语义切分',
+  policy: '条款切分',
+  faq: '问答切分',
+  table: '表格切分',
+  image: '图片切分',
 };
+
+/** 上传时的切分策略选择(默认 auto, 与后端 GET /ingestion/split-strategies 对齐) */
+const chunkStrategy = ref('auto');
+const CHUNK_STRATEGY_OPTIONS = Object.entries(CHUNK_STRATEGY_TEXT).map(([value, label]) => ({
+  label,
+  value,
+}));
 
 const STATUS_TAG: Record<string, { color: string; text: string }> = {
   PENDING: { color: 'default', text: '待解析' },
@@ -271,6 +282,13 @@ onBeforeUnmount(() => stopRowPolling());
   <Page auto-content-height>
     <Grid table-title="入库管线 · 文档列表">
       <template #toolbar-tools>
+        <Select
+          v-model:value="chunkStrategy"
+          :options="CHUNK_STRATEGY_OPTIONS"
+          style="width: 140px"
+          placeholder="切分策略"
+          class="mr-2"
+        />
         <Upload
           :show-upload-list="false"
           :before-upload="handleUploadFile"

@@ -29,7 +29,17 @@ export namespace AiChatApi {
     intent?: string; // 意图(USER 消息识别结果)
     confidence?: number; // 置信度 0~1(AI 消息)
     traceId?: string; // 证据链路追踪号(AI 消息)
+    evidenceList?: EvidenceSummary[]; // 证据摘要(专利来源卡片)
     createTime?: number | string;
+  }
+
+  /** 证据摘要(来源卡片数据; 专利: 申请号/公布号/章节/权利要求号/页码) */
+  export interface EvidenceSummary {
+    chunkId?: number;
+    documentName?: string;
+    versionNo?: string;
+    chunkMetadata?: string; // JSON: applicationNo/publicationNo/sectionType/claimNo/pageStart
+    content?: string; // 引用原文
   }
 
   /** 发送消息响应 */
@@ -39,6 +49,7 @@ export namespace AiChatApi {
     answerable?: boolean; // 是否可作答
     confidence?: null | number; // 证据充分度融合置信度(0~1)
     citations?: null | number[]; // 引用证据 chunkId 列表
+    evidenceList?: null | EvidenceSummary[]; // 证据摘要(专利来源卡片)
     traceId?: null | string; // 证据评估链路追踪号(ev- 前缀)
     transferRequired?: boolean; // 是否需转人工
     transferReason?: null | string; // 转人工原因(transferRequired=true 时填充)
@@ -52,6 +63,7 @@ export function sendChatMessage(data: {
   conversationId?: number;
   customerId?: string;
   message: string;
+  kbIds?: number[]; // 知识库绑定(专利 MVP: 必须选择, 未选后端拒绝全库检索)
 }) {
   return requestClient.post<AiChatApi.SendResp>('/chat/chat/send', data, {
     // LLM 检索+回答链路实测 10~60s, 默认 30s 会超时
