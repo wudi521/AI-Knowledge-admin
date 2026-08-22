@@ -7,8 +7,8 @@ export namespace KnowledgeApi {
   export interface KnowledgeBase {
     id?: number;
     name: string;
-    chunkStrategy?: string;
-    embedModel?: string;
+    /** 知识领域: GENERAL/PATENT */
+    domainCode?: string;
     status?: number;
     remark?: string;
     createTime?: string;
@@ -50,8 +50,8 @@ export interface KnowledgeDocument {
   storagePath?: string;
   fileHash?: string;
   parseStatus?: string;
-  chunkStrategy?: string; // 切分策略(联表)
-  embedModel?: string; // Embedding 模型(联表)
+  chunkStrategy?: string; // 切分策略(文档级: auto/structure/parent-child/semantic/policy/faq/table/image)
+  chunkStrategyParams?: string; // 切分策略参数(JSON)
   chunkCount?: number; // 片段数(解析结果)
   errorMsg?: string; // 失败原因
   versionNo?: string; // 当前版本号(联表)

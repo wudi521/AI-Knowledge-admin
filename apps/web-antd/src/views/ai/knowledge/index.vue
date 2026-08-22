@@ -18,7 +18,7 @@ import { deleteKnowledgeBase, getKnowledgeBasePage } from '#/api/ai/knowledge';
 
 const router = useRouter();
 
-import { CHUNK_STRATEGY_TEXT, useGridColumns, useGridFormSchema } from './data';
+import { useGridColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
 import EvalManage from './knowledge/modules/eval-manage.vue';
 import IntentManage from './knowledge/modules/intent-manage.vue';
@@ -139,8 +139,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
           ]"
         />
       </template>
-      <template #chunkStrategy="{ row }">
-        <span>{{ CHUNK_STRATEGY_TEXT[row.chunkStrategy] || row.chunkStrategy || '-' }}</span>
+      <template #domainCode="{ row }">
+        <Tag v-if="row.domainCode === 'PATENT'" color="blue">专利</Tag>
+        <Tag v-else color="default">通用</Tag>
       </template>
       <template #status="{ row }">
         <Tag :color="row.status === 1 ? 'success' : 'default'">

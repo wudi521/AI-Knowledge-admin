@@ -5,11 +5,14 @@ import { requestClient } from '#/api/request';
 
 /** 切分策略 → 中文 */
 export const CHUNK_STRATEGY_TEXT: Record<string, string> = {
-  Semantic: '语义切分',
-  ParentChild: '父子切分',
-  Table: '表格切分',
-  FAQ: '问答切分',
-  Policy: '条款切分',
+  auto: '自动选择',
+  structure: '结构切分',
+  'parent-child': '父子切分',
+  semantic: '语义切分',
+  policy: '条款切分',
+  faq: '问答切分',
+  table: '表格切分',
+  image: '图片切分',
 };
 
 /** 新增/编辑 表单 */
@@ -31,33 +34,17 @@ export function useFormSchema(): VbenFormSchema[] {
       rules: 'required',
     },
     {
-      fieldName: 'chunkStrategy',
-      label: '切分策略',
+      fieldName: 'domainCode',
+      label: '领域',
       component: 'Select',
       componentProps: {
-        placeholder: '请选择切分策略',
+        placeholder: '请选择知识领域',
         options: [
-          { label: '语义切分 (Semantic)', value: 'Semantic' },
-          { label: '父子切分 (ParentChild)', value: 'ParentChild' },
-          { label: '表格切分 (Table)', value: 'Table' },
-          { label: '问答切分 (FAQ)', value: 'FAQ' },
-          { label: '条款切分 (Policy)', value: 'Policy' },
+          { label: '通用 (GENERAL)', value: 'GENERAL' },
+          { label: '专利 (PATENT)', value: 'PATENT' },
         ],
       },
-      defaultValue: 'ParentChild',
-    },
-    {
-      fieldName: 'embedModel',
-      label: 'Embedding 模型',
-      component: 'Select',
-      componentProps: {
-        placeholder: '请选择 Embedding 模型',
-        options: [
-          { label: 'BGE-M3', value: 'BGE-M3' },
-          { label: 'TextEmbedding-3-v2', value: 'TextEmbedding-3-v2' },
-        ],
-      },
-      defaultValue: 'BGE-M3',
+      defaultValue: 'GENERAL',
     },
     {
       fieldName: 'status',
@@ -138,15 +125,10 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       showOverflow: true,
     },
     {
-      field: 'chunkStrategy',
-      title: '切分策略',
-      minWidth: 130,
-      slots: { default: 'chunkStrategy' },
-    },
-    {
-      field: 'embedModel',
-      title: 'Embedding 模型',
-      minWidth: 140,
+      field: 'domainCode',
+      title: '领域',
+      width: 90,
+      slots: { default: 'domainCode' },
     },
     {
       field: 'status',
