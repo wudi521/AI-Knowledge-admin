@@ -32,7 +32,7 @@ import {
 const conversations = ref<AiChatApi.Conversation[]>([]);
 /** 知识库选择(专利 MVP: 必须选择一个; 单选) */
 const kbOptions = ref<{ id: number; name: string; domainCode?: string }[]>([]);
-const selectedKbId = ref<null | number>(null);
+const selectedKbId = ref<number | undefined>(undefined);
 const kbLoading = ref(false);
 const loadingList = ref(false);
 const curId = ref<null | number>(null);
