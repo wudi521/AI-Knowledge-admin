@@ -1,10 +1,10 @@
 <script lang="ts" setup>
 import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Button, Card, Descriptions, message, Statistic, Table, Tag } from 'ant-design-vue';
+import { Button, Card, Descriptions, Statistic, Table, Tag } from 'ant-design-vue';
 import { getDocumentPage, type KnowledgeDocument } from '#/api/ai/knowledge';
 import { getKnowledgeBasePage } from '#/api/ai/knowledge';
-import { docMetaField } from '../document/data';
+import { docMetaField } from '../../document/data';
 
 defineOptions({ name: 'KnowledgeWorkspace' });
 
@@ -60,6 +60,7 @@ function openChunks(doc: KnowledgeDocument) {
 function editKb() {
   router.push({ path: '/kb/knowledge-base' });
 }
+onMounted(() => { loadKb(); loadDocs(); });
 </script>
 
 <template>
@@ -85,8 +86,8 @@ function editKb() {
       <TabPane key="overview" tab="概览">
         <Row :gutter="16">
           <Col :span="6"><Card><Statistic title="文档" :value="docs.length" /></Card></Col>
-          <Col :span="6"><Card><Statistic title="已发布" :value="publishedCount()" value-style="color:#16a34a" /></Card></Col>
-          <Col :span="6"><Card><Statistic title="异常" :value="failedCount()" value-style="color:#ef4444" /></Card></Col>
+          <Col :span="6"><Card><Statistic title="已发布" :value="publishedCount()" :value-style="{ color: '#16a34a' }" /></Card></Col>
+          <Col :span="6"><Card><Statistic title="异常" :value="failedCount()" :value-style="{ color: '#ef4444' }" /></Card></Col>
           <Col :span="6"><Card><Statistic title="含专利元数据" :value="withMetadata()" /></Card></Col>
         </Row>
         <Card title="快捷操作" size="small" style="margin-top: 12px">
@@ -121,7 +122,7 @@ function editKb() {
           <TableColumn title="操作" width="220" fixed="right">
             <template #default="{ record }">
               <Space>
-                <a @click="viewTrace(record.id)">查看链路</a>
+                <a @click="viewTrace(record.id!)">查看链路</a>
                 <a @click="openChunks(record)">知识片段</a>
               </Space>
             </template>
@@ -157,7 +158,7 @@ function editKb() {
           <ul v-else>
             <li v-for="d in docs.filter((x) => x.parseStatus === 'FAILED')" :key="d.id">
               {{ d.name }}：{{ d.errorMsg || '解析失败' }}
-              <a @click="viewTrace(d.id)">查看链路</a>
+              <a @click="viewTrace(d.id!)">查看链路</a>
             </li>
           </ul>
         </Card>
