@@ -74,6 +74,20 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       slots: { default: 'chunkStrategy' },
     },
     {
+      field: 'applicationNo',
+      title: '申请号',
+      width: 140,
+      showOverflow: true,
+      formatter: ({ row }: any) => docMetaField(row.domainMetadata, 'applicationNo') || '-',
+    },
+    {
+      field: 'publicationNo',
+      title: '公布号',
+      width: 140,
+      showOverflow: true,
+      formatter: ({ row }: any) => docMetaField(row.domainMetadata, 'publicationNo') || '-',
+    },
+    {
       field: 'type',
       title: '类型',
       width: 90,
@@ -117,4 +131,16 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       fixed: 'right',
     },
   ];
+}
+
+/** 解析领域文档元数据 JSON(专利: applicationNo/publicationNo/title) */
+export function docMetaField(meta: string | undefined, key: string): string {
+  if (!meta) return '';
+  try {
+    const m = JSON.parse(meta);
+    const v = m[key];
+    return v === undefined || v === null ? '' : String(v);
+  } catch {
+    return '';
+  }
 }

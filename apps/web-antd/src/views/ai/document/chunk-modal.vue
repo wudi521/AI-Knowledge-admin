@@ -26,6 +26,18 @@ const props = withDefaults(
   },
 );
 
+/** 解析 chunk metadata JSON(专利: sectionTitle/claimNo/sectionType) */
+function metaField(meta: string | undefined, key: string): string {
+  if (!meta) return '';
+  try {
+    const m = JSON.parse(meta);
+    const v = m[key];
+    return v === undefined || v === null ? '' : String(v);
+  } catch {
+    return '';
+  }
+}
+
 const emit = defineEmits<{
   'update:open': [v: boolean];
   success: [];
@@ -105,6 +117,19 @@ const [Grid, gridApi] = useVbenVxeGrid({
         title: '类型',
         width: 90,
         slots: { default: 'chunkType' },
+      },
+      {
+        field: 'patentSection',
+        title: '章节',
+        width: 110,
+        formatter: ({ row }: any) => metaField(row.metadata, 'sectionTitle') || '-',
+      },
+      {
+        field: 'patentClaim',
+        title: '权利要求',
+        width: 110,
+        formatter: ({ row }: any) =>
+          metaField(row.metadata, 'claimNo') ? `权利要求 ${metaField(row.metadata, 'claimNo')}` : '-',
       },
       {
         type: 'expand',

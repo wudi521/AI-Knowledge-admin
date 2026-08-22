@@ -52,6 +52,7 @@ export interface KnowledgeDocument {
   parseStatus?: string;
   chunkStrategy?: string; // 切分策略(文档级: auto/structure/parent-child/semantic/policy/faq/table/image)
   chunkStrategyParams?: string; // 切分策略参数(JSON)
+  domainMetadata?: string; // 领域文档元数据(JSON; 专利著录信息)
   chunkCount?: number; // 片段数(解析结果)
   errorMsg?: string; // 失败原因
   versionNo?: string; // 当前版本号(联表)

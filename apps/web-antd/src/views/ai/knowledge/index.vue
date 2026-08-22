@@ -157,6 +157,15 @@ const [Grid, gridApi] = useVbenVxeGrid({
               onClick: () => handleEdit(row),
             },
             {
+              label: '进入空间',
+              icon: 'lucide:layout-dashboard',
+              onClick: () =>
+                router.push({
+                  path: '/kb/workspace',
+                  query: { kbId: row.id },
+                }),
+            },
+            {
               label: '检索测试',
               icon: ACTION_ICON.SEARCH,
               onClick: () =>
