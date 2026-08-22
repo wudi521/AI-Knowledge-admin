@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { message } from 'ant-design-vue';
+import { Descriptions, message } from 'ant-design-vue';
 import { getDocumentTrace, type OpsApi } from '#/api/ai/ops';
 
 const documentId = ref<number | undefined>(undefined);
