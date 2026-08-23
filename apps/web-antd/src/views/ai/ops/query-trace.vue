@@ -1,15 +1,46 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { Descriptions, message } from 'ant-design-vue';
 import { getQueryTrace, type OpsApi } from '#/api/ai/ops';
 
-const traceId = ref<string>('');
+const route = useRoute();
+const traceId = ref<string>(String(route.query.traceId || ''));
 const loading = ref(false);
 const trace = ref<OpsApi.QueryTrace | null>(null);
 
+const STAGE_TEXT: Record<string, string> = {
+  ANALYZE: '理解问题',
+  REWRITE: '查询改写',
+  SCOPE_FILTER: '范围过滤',
+  BM25: '关键词检索',
+  VECTOR: '语义检索',
+  FUSION: '结果融合',
+  RERANK: '相关性重排',
+  EVIDENCE: '证据构建',
+  GENERATE: '生成回答',
+  VERIFY: '答案验证',
+};
+
+const ROUTE_TEXT: Record<string, string> = {
+  EXACT_METADATA: '结构化信息直查',
+  EXACT_CLAIM: '精确权利要求查询',
+  SCOPED_RAG: '指定文档检索问答',
+  HYBRID_RAG: '混合检索问答',
+  SCOPE_FILTER_HYBRID_RAG: '范围过滤后混合检索',
+  ABSTAIN: '拒绝作答',
+};
+
+function stageText(stage?: string) {
+  return stage ? STAGE_TEXT[stage] || stage : '-';
+}
+function routeText(value?: string) {
+  return value ? ROUTE_TEXT[value] || value : '-';
+}
+
 async function query() {
   if (!traceId.value.trim()) {
-    message.warning('请输入 Trace ID');
+    message.warning('请从一次问答/调试结果进入，或输入 Trace ID');
     return;
   }
   loading.value = true;
@@ -28,33 +59,40 @@ async function query() {
 function fmtTime(t?: string): string {
   return t ? String(t).replace('T', ' ').substring(0, 19) : '-';
 }
+
+onMounted(() => {
+  if (traceId.value) query();
+});
 </script>
 
 <template>
-  <Page auto-content-height title="查询链路 · Query Trace">
+  <Page
+    auto-content-height
+    title="查询链路"
+    description="查看一次问答实际走过的路由、检索和证据阶段。优先从问答调试或知识问答工作台直接进入。"
+  >
     <div class="ops-toolbar">
-      <Input v-model:value="traceId" placeholder="输入 Trace ID(如 ev-xxx / 检索测试页 traceId)" style="width: 320px" />
-      <Button type="primary" :loading="loading" @click="query">查询链路</Button>
+      <Input v-model:value="traceId" placeholder="Trace ID（高级排障时手动输入）" style="width: 360px" @press-enter="query" />
+      <Button type="primary" :loading="loading" @click="query">查看执行详情</Button>
     </div>
 
     <template v-if="trace?.traceId">
-      <Descriptions title="检索轨迹" bordered size="small" class="ops-card">
-        <Descriptions.Item label="问题">{{ trace.query }}</Descriptions.Item>
-        <Descriptions.Item label="路由">{{ trace.route }}</Descriptions.Item>
-        <Descriptions.Item label="意图">{{ trace.intent }}</Descriptions.Item>
-        <Descriptions.Item label="领域">{{ trace.domainCode }}</Descriptions.Item>
-        <Descriptions.Item label="变体数">{{ trace.variantCount }}</Descriptions.Item>
-        <Descriptions.Item label="BM25 命中">{{ trace.bm25Hits }}</Descriptions.Item>
-        <Descriptions.Item label="向量命中">{{ trace.vectorHits }}</Descriptions.Item>
-        <Descriptions.Item label="融合候选">{{ trace.fused }}</Descriptions.Item>
-        <Descriptions.Item label="返回结果">{{ trace.resultCount }}</Descriptions.Item>
-        <Descriptions.Item label="耗时(ms)">{{ trace.elapsedMs }}</Descriptions.Item>
-        <Descriptions.Item label="阻断">
-          <Tag :color="trace.blocked ? 'red' : 'green'">{{ trace.blocked ? '是' : '否' }}</Tag>
+      <Descriptions title="本次问答" bordered size="small" class="ops-card" :column="3">
+        <Descriptions.Item label="问题" :span="3">{{ trace.query }}</Descriptions.Item>
+        <Descriptions.Item label="执行策略">{{ routeText(trace.route) }}</Descriptions.Item>
+        <Descriptions.Item label="意图">{{ trace.intent || '-' }}</Descriptions.Item>
+        <Descriptions.Item label="领域">{{ trace.domainCode === 'PATENT' ? '专利' : trace.domainCode || '通用' }}</Descriptions.Item>
+        <Descriptions.Item label="关键词召回">{{ trace.bm25Hits ?? 0 }}</Descriptions.Item>
+        <Descriptions.Item label="语义召回">{{ trace.vectorHits ?? 0 }}</Descriptions.Item>
+        <Descriptions.Item label="最终证据">{{ trace.resultCount ?? 0 }}</Descriptions.Item>
+        <Descriptions.Item label="总耗时">{{ trace.elapsedMs != null ? `${trace.elapsedMs} ms` : '-' }}</Descriptions.Item>
+        <Descriptions.Item label="是否阻断">
+          <Tag :color="trace.blocked ? 'red' : 'green'">{{ trace.blocked ? '已阻断' : '正常' }}</Tag>
         </Descriptions.Item>
+        <Descriptions.Item label="Trace ID"><span class="font-mono text-xs">{{ trace.traceId }}</span></Descriptions.Item>
       </Descriptions>
 
-      <Card title="阶段时间轴" size="small" class="ops-card">
+      <Card title="执行过程" size="small" class="ops-card">
         <Timeline v-if="trace.stages && trace.stages.length">
           <TimelineItem
             v-for="(s, i) in trace.stages"
@@ -62,12 +100,15 @@ function fmtTime(t?: string): string {
             :color="s.status === 'SUCCEEDED' ? 'green' : s.status === 'FAILED' ? 'red' : 'blue'"
           >
             <div class="ops-stage">
-              <b>{{ s.stageCode }}</b>
+              <b>{{ stageText(s.stageCode) }}</b>
               <span class="ops-stage-meta">
-                {{ s.handler || '' }} · {{ s.status }} · {{ fmtTime(s.startedAt) }} ~ {{ fmtTime(s.finishedAt) }}
+                {{ s.status || '' }} · {{ fmtTime(s.startedAt) }} ~ {{ fmtTime(s.finishedAt) }}
               </span>
-              <div v-if="s.metricsJson" class="ops-stage-meta">{{ s.metricsJson }}</div>
               <div v-if="s.errorMessage" class="ops-error">{{ s.errorMessage }}</div>
+              <details v-if="s.metricsJson" class="ops-stage-meta mt-1">
+                <summary>技术指标</summary>
+                {{ s.metricsJson }}
+              </details>
             </div>
           </TimelineItem>
         </Timeline>
@@ -78,21 +119,8 @@ function fmtTime(t?: string): string {
 </template>
 
 <style scoped>
-.ops-toolbar {
-  margin-bottom: 12px;
-  display: flex;
-  gap: 8px;
-}
-.ops-card {
-  margin-bottom: 12px;
-}
-.ops-stage-meta {
-  margin-left: 8px;
-  color: #8a8a8e;
-  font-size: 12px;
-}
-.ops-error {
-  color: #ef4444;
-  font-size: 12px;
-}
+.ops-toolbar { margin-bottom: 12px; display: flex; gap: 8px; }
+.ops-card { margin-bottom: 12px; }
+.ops-stage-meta { margin-left: 8px; color: #8a8a8e; font-size: 12px; }
+.ops-error { color: #ef4444; font-size: 12px; }
 </style>
