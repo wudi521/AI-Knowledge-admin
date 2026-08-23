@@ -3,7 +3,6 @@ import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 
 import { getKnowledgeBasePage } from '#/api/ai/knowledge';
 
-/** 列表搜索 */
 export function useGridFormSchema(): VbenFormSchema[] {
   return [
     {
@@ -21,82 +20,71 @@ export function useGridFormSchema(): VbenFormSchema[] {
     },
     {
       fieldName: 'name',
-      label: '文档名',
+      label: '文档名称',
       component: 'Input',
-      componentProps: {
-        placeholder: '请输入文档名',
-        clearable: true,
-      },
+      componentProps: { placeholder: '搜索文档', clearable: true },
     },
     {
       fieldName: 'parseStatus',
-      label: '解析状态',
+      label: '处理状态',
       component: 'Select',
       componentProps: {
-        placeholder: '请选择解析状态',
+        placeholder: '全部状态',
         allowClear: true,
         options: [
-          { label: '待解析', value: 'PENDING' },
+          { label: '待处理', value: 'PENDING' },
           { label: '解析中', value: 'PARSING' },
-          { label: '向量化中', value: 'EMBEDDING' },
-          { label: '抽取中', value: 'EXTRACTING' },
-          { label: '审核中', value: 'REVIEW' },
-          { label: '已入库', value: 'INDEXED' },
+          { label: '知识构建中', value: 'EXTRACTING' },
+          { label: '索引构建中', value: 'EMBEDDING' },
+          { label: '待审核', value: 'REVIEW' },
+          { label: '待发布', value: 'INDEXED' },
           { label: '已发布', value: 'PUBLISHED' },
-          { label: '失败', value: 'FAILED' },
+          { label: '处理失败', value: 'FAILED' },
         ],
       },
     },
   ];
 }
 
-/** 列表列 */
 export function useGridColumns(): VxeTableGridOptions['columns'] {
   return [
-    { field: 'id', title: '编号', width: 80 },
     {
       field: 'name',
-      title: '文档名',
-      minWidth: 220,
+      title: '文档名称',
+      minWidth: 240,
       showOverflow: true,
       slots: { default: 'name' },
     },
     {
       field: 'kbName',
       title: '所属知识库',
-      width: 140,
+      width: 150,
       showOverflow: true,
-    },
-    {
-      field: 'chunkStrategy',
-      title: '切分策略',
-      width: 120,
-      slots: { default: 'chunkStrategy' },
     },
     {
       field: 'applicationNo',
       title: '申请号',
-      width: 140,
+      width: 145,
       showOverflow: true,
       formatter: ({ row }: any) => docMetaField(row.domainMetadata, 'applicationNo') || '-',
     },
     {
       field: 'publicationNo',
       title: '公布号',
-      width: 140,
+      width: 145,
       showOverflow: true,
       formatter: ({ row }: any) => docMetaField(row.domainMetadata, 'publicationNo') || '-',
     },
     {
       field: 'type',
-      title: '类型',
+      title: '文件类型',
       width: 90,
       slots: { default: 'type' },
     },
     {
       field: 'parseStatus',
-      title: '解析状态',
-      width: 130,
+      title: '业务状态',
+      width: 120,
       slots: { default: 'status' },
     },
     {
@@ -107,8 +95,8 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
     },
     {
       field: 'chunkCount',
-      title: '片段数',
-      width: 90,
+      title: '知识单元',
+      width: 100,
       align: 'center',
       slots: { default: 'chunkCount' },
     },
@@ -126,14 +114,13 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
     {
       field: 'operation',
       title: '操作',
-      width: 260,
+      width: 300,
       slots: { default: 'operation' },
       fixed: 'right',
     },
   ];
 }
 
-/** 解析领域文档元数据 JSON(专利: applicationNo/publicationNo/title) */
 export function docMetaField(meta: string | undefined, key: string): string {
   if (!meta) return '';
   try {
