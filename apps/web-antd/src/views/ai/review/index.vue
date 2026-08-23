@@ -2,69 +2,140 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { ActionItem } from '#/adapter/vxe-table';
 import type { AiReviewApi } from '#/api/ai/review';
+import type { KnowledgeDocument } from '#/api/ai/knowledge';
 
-import { ref } from 'vue';
-
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
-
-import { Modal, Tag, message, Descriptions } from 'ant-design-vue';
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Empty,
+  Modal,
+  Space,
+  Table,
+  Tag,
+  message,
+} from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getChunk } from '#/api/ai/chunk';
 import type { AiChunkApi } from '#/api/ai/chunk';
 import {
+  getDocumentPage,
+  getKnowledgeBasePage,
+} from '#/api/ai/knowledge';
+import {
   approveReviewItem,
   getReviewItemPage,
   rejectReviewItem,
 } from '#/api/ai/review';
-import { publishVersion } from '#/api/ai/version';
-
-/** 来源片段内容缓存(展开行懒加载) */
-import { reactive } from 'vue';
-const chunkCache = new Map<number, string>();
-const chunkContents = reactive<Record<number, string>>({});
-
-/** 展开行时加载来源片段内容 */
-async function loadChunk(row: AiReviewApi.ReviewItem) {
-  if (!row.chunkId || chunkContents[row.chunkId] !== undefined) {
-    return;
-  }
-  chunkContents[row.chunkId] = '';
-  if (chunkCache.has(row.chunkId)) {
-    chunkContents[row.chunkId] = chunkCache.get(row.chunkId)!;
-    return;
-  }
-  try {
-    const chunk = await getChunk(row.chunkId);
-    const content = chunk?.content || '(片段不存在)';
-    chunkCache.set(row.chunkId, content);
-    chunkContents[row.chunkId] = content;
-  } catch {
-    chunkContents[row.chunkId] = '(片段加载失败)';
-  }
-}
-
-/** 片段详情弹窗(点击来源片段 id 打开) */
-const chunkDetailOpen = ref(false);
-const chunkDetail = ref<AiChunkApi.Chunk>();
-async function openChunkDetail(chunkId?: number) {
-  if (!chunkId) {
-    return;
-  }
-  try {
-    chunkDetail.value = await getChunk(chunkId);
-    chunkDetailOpen.value = true;
-  } catch {
-    message.error('片段详情加载失败');
-  }
-}
+import { publishVersion, rejectVersion } from '#/api/ai/version';
+import { docMetaField } from '../document/data';
 
 const route = useRoute();
 const router = useRouter();
 
-/** 条目类型 -> Tag */
+/** 待审核文档是审核发布的业务入口；PATENT 没有客服式 ReviewItem，必须以文档版本为审核对象。 */
+const reviewDocs = ref<KnowledgeDocument[]>([]);
+const docsLoading = ref(false);
+const kbDomainMap = ref<Record<number, string>>({});
+const selectedDoc = ref<KnowledgeDocument>();
+const docIdFilter = ref<number | undefined>(
+  route.query.docId ? Number(route.query.docId) : undefined,
+);
+
+function domainOf(doc?: KnowledgeDocument): string {
+  return doc?.kbId ? kbDomainMap.value[doc.kbId] || 'GENERAL' : 'GENERAL';
+}
+
+async function loadReviewDocuments() {
+  docsLoading.value = true;
+  try {
+    const [docs, kbs] = await Promise.all([
+      getDocumentPage({ pageNo: 1, pageSize: 200, parseStatus: 'REVIEW' }),
+      getKnowledgeBasePage({ pageNo: 1, pageSize: 200 }),
+    ]);
+    reviewDocs.value = docs.list || [];
+    kbDomainMap.value = Object.fromEntries(
+      (kbs.list || []).filter((kb) => kb.id != null).map((kb) => [kb.id!, kb.domainCode || 'GENERAL']),
+    );
+    if (docIdFilter.value) {
+      const match = reviewDocs.value.find((doc) => doc.id === docIdFilter.value);
+      if (match) selectDocument(match);
+    }
+  } catch {
+    message.error('待审核文档加载失败');
+  } finally {
+    docsLoading.value = false;
+  }
+}
+
+/** 选择文档：PATENT 走文档级确认；GENERAL 再进入条目级审核。 */
+function selectDocument(doc: KnowledgeDocument) {
+  selectedDoc.value = doc;
+  docIdFilter.value = doc.id;
+  if (domainOf(doc) !== 'PATENT') {
+    currentTab.value = 'PENDING';
+    gridApi.query();
+  }
+}
+
+function openDocumentTrace(doc: KnowledgeDocument) {
+  router.push({ path: '/kb/ops/document-trace', query: { documentId: doc.id } });
+}
+
+function openQuality(doc: KnowledgeDocument) {
+  router.push({ path: '/ai/eval', query: { kbId: doc.kbId } });
+}
+
+/** 文档级发布：所有领域最终都走同一 VersionService 门禁(审核/冲突/评测/索引)。 */
+async function publishDocument(doc: KnowledgeDocument) {
+  if (!doc.versionId) {
+    message.warning('未找到当前待发布版本，请刷新后重试');
+    return;
+  }
+  try {
+    await publishVersion(doc.versionId);
+    message.success(`「${doc.name}」发布成功`);
+    if (selectedDoc.value?.id === doc.id) selectedDoc.value = undefined;
+    await loadReviewDocuments();
+    gridApi.query();
+  } catch (e: any) {
+    message.error(e?.message || '发布失败：请检查审核条目、冲突和质量闸门');
+  }
+}
+
+/** 文档级驳回。 */
+const rejectVersionOpen = ref(false);
+const rejectDoc = ref<KnowledgeDocument>();
+const rejectVersionReason = ref('');
+function openRejectVersion(doc: KnowledgeDocument) {
+  rejectDoc.value = doc;
+  rejectVersionReason.value = '';
+  rejectVersionOpen.value = true;
+}
+async function confirmRejectVersion() {
+  const doc = rejectDoc.value;
+  if (!doc?.versionId || !rejectVersionReason.value.trim()) {
+    message.warning('请填写驳回原因');
+    return;
+  }
+  try {
+    await rejectVersion(doc.versionId, rejectVersionReason.value.trim());
+    message.success(`「${doc.name}」已驳回`);
+    rejectVersionOpen.value = false;
+    if (selectedDoc.value?.id === doc.id) selectedDoc.value = undefined;
+    await loadReviewDocuments();
+  } catch (e: any) {
+    message.error(e?.message || '驳回失败');
+  }
+}
+
+/** ===== 通用知识条目审核 ===== */
 const ITEM_TYPE_TAG: Record<string, { color: string; text: string }> = {
   POLICY: { color: 'purple', text: '政策' },
   PRICE: { color: 'red', text: '价格' },
@@ -72,58 +143,38 @@ const ITEM_TYPE_TAG: Record<string, { color: string; text: string }> = {
   FAQ: { color: 'green', text: '问答' },
   SOP: { color: 'cyan', text: '流程' },
 };
-
-/** 风险等级 -> Tag */
 const RISK_TAG: Record<string, { color: string; text: string }> = {
   HIGH: { color: 'error', text: '高风险' },
   MED: { color: 'warning', text: '中风险' },
   LOW: { color: 'success', text: '低风险' },
 };
-
-/** 条目状态 -> Tag */
 const STATUS_TAG: Record<string, { color: string; text: string }> = {
   PENDING: { color: 'processing', text: '待审核' },
   APPROVED: { color: 'success', text: '已通过' },
   REJECTED: { color: 'error', text: '已驳回' },
 };
-
-/** 四 tab: 待审核 / 已通过 / 已驳回 / 冲突待裁决 */
 const tabs = [
   { key: 'PENDING', label: '待审核' },
   { key: 'APPROVED', label: '已通过' },
   { key: 'REJECTED', label: '已驳回' },
-  { key: 'CONFLICT', label: '冲突待裁决' },
 ];
-const currentTab = ref<string>((route.query.status as string) || 'PENDING');
-const docIdFilter = ref<number | undefined>(
-  route.query.docId ? Number(route.query.docId) : undefined,
-);
+const currentTab = ref<string>('PENDING');
 
-/** 当前版本(发布按钮用) */
-const currentVersionId = ref<number>();
-
-/** 切换 tab */
 function handleTabChange(key: string) {
   currentTab.value = key;
-  if (key === 'CONFLICT') {
-    router.push({ path: '/ai/conflict', query: docIdFilter.value ? { docId: docIdFilter.value } : {} });
-    return;
-  }
   gridApi.query();
 }
 
-/** 通过条目 */
 async function handleApprove(row: AiReviewApi.ReviewItem) {
   try {
     await approveReviewItem(row.id);
-    message.success('已通过');
+    message.success('条目已通过');
     gridApi.query();
   } catch {
     message.error('操作失败');
   }
 }
 
-/** 驳回条目(弹窗填原因) */
 const rejectOpen = ref(false);
 const rejectRow = ref<AiReviewApi.ReviewItem>();
 const rejectReason = ref('');
@@ -139,7 +190,7 @@ async function confirmReject() {
   }
   try {
     await rejectReviewItem(rejectRow.value.id, rejectReason.value.trim());
-    message.success('已驳回');
+    message.success('条目已驳回');
     rejectOpen.value = false;
     gridApi.query();
   } catch {
@@ -147,275 +198,240 @@ async function confirmReject() {
   }
 }
 
-/** 发布当前版本 */
-async function handlePublish() {
-  if (!currentVersionId.value) {
-    message.warning('当前无待发布版本');
+const chunkCache = new Map<number, string>();
+const chunkContents = reactive<Record<number, string>>({});
+async function loadChunk(row: AiReviewApi.ReviewItem) {
+  if (!row.chunkId || chunkContents[row.chunkId] !== undefined) return;
+  chunkContents[row.chunkId] = '';
+  if (chunkCache.has(row.chunkId)) {
+    chunkContents[row.chunkId] = chunkCache.get(row.chunkId)!;
     return;
   }
   try {
-    await publishVersion(currentVersionId.value);
-    message.success('发布成功');
-    gridApi.query();
-  } catch (e: any) {
-    message.error(e?.message || '发布失败(存在未处理完的必审条目或待裁决冲突)');
+    const chunk = await getChunk(row.chunkId);
+    const content = chunk?.content || '(知识单元不存在)';
+    chunkCache.set(row.chunkId, content);
+    chunkContents[row.chunkId] = content;
+  } catch {
+    chunkContents[row.chunkId] = '(知识单元加载失败)';
+  }
+}
+
+const chunkDetailOpen = ref(false);
+const chunkDetail = ref<AiChunkApi.Chunk>();
+async function openChunkDetail(chunkId?: number) {
+  if (!chunkId) return;
+  try {
+    chunkDetail.value = await getChunk(chunkId);
+    chunkDetailOpen.value = true;
+  } catch {
+    message.error('来源内容加载失败');
   }
 }
 
 const gridOptions: VxeTableGridOptions<AiReviewApi.ReviewItem> = {
   columns: [
+    { type: 'expand', width: 40, slots: { content: 'expand_content' } },
+    { field: 'title', title: '主题', minWidth: 180, showOverflow: true },
+    { field: 'itemType', title: '类型', width: 90, slots: { default: 'itemType' } },
+    { field: 'riskLevel', title: '风险', width: 90, slots: { default: 'riskLevel' } },
+    { field: 'content', title: '知识内容', minWidth: 280, showOverflow: true },
     {
-      type: 'expand',
-      width: 40,
-      slots: { content: 'expand_content' },
+      field: 'aiConfidence', title: 'AI 置信度', width: 100,
+      formatter: ({ row }: any) => row.aiConfidence == null ? '-' : Number(row.aiConfidence).toFixed(2),
     },
-    {
-      field: 'title',
-      title: '主题',
-      minWidth: 180,
-      showOverflow: true,
-    },
-    {
-      field: 'itemType',
-      title: '类型',
-      width: 90,
-      slots: { default: 'itemType' },
-    },
-    {
-      field: 'riskLevel',
-      title: '风险',
-      width: 90,
-      slots: { default: 'riskLevel' },
-    },
-    {
-      field: 'content',
-      title: '条目内容',
-      minWidth: 260,
-      showOverflow: true,
-    },
-    {
-      field: 'aiConfidence',
-      title: 'AI置信度',
-      width: 100,
-      formatter: ({ row }: any) =>
-        row.aiConfidence == null ? '-' : Number(row.aiConfidence).toFixed(2),
-    },
-    {
-      field: 'docName',
-      title: '来源文档',
-      minWidth: 140,
-      showOverflow: true,
-    },
-    {
-      field: 'chunkId',
-      title: '来源片段',
-      width: 110,
-      slots: { default: 'chunkId' },
-    },
-    {
-      field: 'reviewer',
-      title: '审核人',
-      width: 90,
-    },
-    {
-      field: 'status',
-      title: '状态',
-      width: 90,
-      slots: { default: 'status' },
-    },
-    {
-      title: '操作',
-      width: 240,
-      fixed: 'right',
-      slots: { default: 'actions' },
-    },
+    { field: 'chunkId', title: '来源证据', width: 110, slots: { default: 'chunkId' } },
+    { field: 'reviewer', title: '审核人', width: 90 },
+    { field: 'status', title: '状态', width: 90, slots: { default: 'status' } },
+    { title: '操作', width: 160, fixed: 'right', slots: { default: 'actions' } },
   ],
-  height: 'auto',
+  height: 420,
   keepSource: true,
   proxyConfig: {
     ajax: {
       query: async ({ page }) => {
-        // 分页时解析当前版本(用于发布按钮)
-        const data = await getReviewItemPage({
+        if (!selectedDoc.value?.id || domainOf(selectedDoc.value) === 'PATENT') {
+          return { list: [], total: 0 };
+        }
+        return await getReviewItemPage({
           pageNo: page.currentPage,
           pageSize: page.pageSize,
-          status: currentTab.value === 'CONFLICT' ? undefined : currentTab.value,
-          docId: docIdFilter.value,
+          status: currentTab.value,
+          docId: selectedDoc.value.id,
         });
-        const first = data.list[0];
-        currentVersionId.value = first?.versionId;
-        return data;
       },
     },
   },
-  rowConfig: {
-    keyField: 'id',
-    isHover: true,
-  },
-  toolbarConfig: {
-    refresh: true,
-    search: false,
-  },
+  rowConfig: { keyField: 'id', isHover: true },
+  toolbarConfig: { refresh: true, search: false },
 };
 
-/** 操作列(通过/驳回) */
 function buildActions(row: AiReviewApi.ReviewItem): ActionItem[] {
-  const actions: ActionItem[] = [];
-  if (row.status === 'PENDING') {
-    actions.push({
-      label: '通过',
-      type: 'link',
-      icon: ACTION_ICON.AUDIT,
-      onClick: () => handleApprove(row),
-    });
-    actions.push({
-      label: '驳回',
-      type: 'link',
-      danger: true,
-      icon: ACTION_ICON.CLOSE,
-      onClick: () => openReject(row),
-    });
-  }
-  return actions;
+  if (row.status !== 'PENDING') return [];
+  return [
+    { label: '通过', type: 'link', icon: ACTION_ICON.AUDIT, onClick: () => handleApprove(row) },
+    { label: '驳回', type: 'link', danger: true, icon: ACTION_ICON.CLOSE, onClick: () => openReject(row) },
+  ];
 }
 
 const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions,
   gridEvents: {
     expandChange: ({ row, expanded }: any) => {
-      if (expanded) {
-        loadChunk(row);
-      }
+      if (expanded) loadChunk(row);
     },
   } as any,
 });
+
+const isPatentSelected = computed(() => domainOf(selectedDoc.value) === 'PATENT');
+
+onMounted(loadReviewDocuments);
 </script>
 
 <template>
-  <Page auto-content-height>
-    <Grid table-title="知识审核台">
-      <template #toolbar-tools>
-        <a-input-number
-          v-model:value="docIdFilter"
-          class="w-44"
-          placeholder="按文档编号过滤"
-          :controls="false"
-          @change="gridApi.query()"
-        />
-        <a-button type="primary" :disabled="!currentVersionId" @click="handlePublish">
-          发布当前版本
-        </a-button>
-      </template>
-      <template #toolbar-actions>
-        <div class="flex gap-1">
-          <a-button
-            v-for="tab in tabs"
-            :key="tab.key"
-            :type="currentTab === tab.key ? 'primary' : 'default'"
-            size="small"
-            @click="handleTabChange(tab.key)"
-          >
-            {{ tab.label }}
-          </a-button>
-        </div>
-      </template>
-      <template #itemType="{ row }">
-        <Tag :color="ITEM_TYPE_TAG[row.itemType]?.color || 'default'">
-          {{ ITEM_TYPE_TAG[row.itemType]?.text || row.itemType }}
-        </Tag>
-      </template>
-      <template #chunkId="{ row }">
-        <a
-          v-if="row.chunkId"
-          class="text-blue-500 hover:underline"
-          @click="openChunkDetail(row.chunkId)"
-        >
-          #{{ row.chunkId }}
-        </a>
-        <span v-else class="text-muted-foreground">-</span>
-      </template>
-      <template #expand_content="{ row }">
-        <div class="whitespace-pre-wrap border-l-4 border-blue-500 px-2.5 py-5 leading-5">
-          <div class="mb-2 text-sm font-bold text-muted-foreground">
-            来源片段 #{{ row.chunkId || '-' }}
-          </div>
-          {{
-            chunkContents[row.chunkId ?? -1] ?? (row.chunkId ? '片段内容加载中…' : '无来源片段(未匹配到)')
-          }}
-        </div>
-      </template>
-      <template #riskLevel="{ row }">
-        <Tag :color="RISK_TAG[row.riskLevel]?.color || 'default'">
-          {{ RISK_TAG[row.riskLevel]?.text || row.riskLevel }}
-        </Tag>
-      </template>
-      <template #status="{ row }">
-        <Tag :color="STATUS_TAG[row.status]?.color || 'default'">
-          {{ STATUS_TAG[row.status]?.text || row.status }}
-        </Tag>
-      </template>
-      <template #actions="{ row }">
-        <TableAction :actions="buildActions(row)" />
-      </template>
-    </Grid>
+  <Page
+    auto-content-height
+    title="审核发布"
+    description="文档完成解析和知识构建后在此确认。专利按文档版本审核；通用知识按知识条目审核。最终发布统一经过冲突、质量闸门和索引门禁。"
+  >
+    <Alert
+      class="mb-4"
+      type="info"
+      show-icon
+      message="审核不是独立终点：通过后仍需发布，发布成功后内容才进入正式检索服务。"
+    />
 
-    <!-- 驳回原因弹窗(规范: antd Modal z-index 1000 + destroyOnClose) -->
-    <Modal
-      v-model:open="rejectOpen"
-      title="驳回审核条目"
-      :z-index="1000"
-      :destroy-on-close="true"
-      @ok="confirmReject"
-    >
+    <Card title="待审核文档" size="small" class="mb-4">
+      <Table
+        :data-source="reviewDocs"
+        :loading="docsLoading"
+        row-key="id"
+        size="small"
+        :pagination="false"
+      >
+        <Table.Column title="文档" data-index="name" :width="260" ellipsis />
+        <Table.Column title="知识库" data-index="kbName" :width="160" />
+        <Table.Column title="领域" :width="90">
+          <template #default="{ record }">
+            <Tag :color="domainOf(record) === 'PATENT' ? 'blue' : 'default'">
+              {{ domainOf(record) === 'PATENT' ? '专利' : '通用' }}
+            </Tag>
+          </template>
+        </Table.Column>
+        <Table.Column title="版本" data-index="versionNo" :width="90" />
+        <Table.Column title="领域信息" :width="260">
+          <template #default="{ record }">
+            <template v-if="domainOf(record) === 'PATENT'">
+              {{ docMetaField(record.domainMetadata, 'publicationNo') || docMetaField(record.domainMetadata, 'applicationNo') || '-' }}
+              <span class="text-muted-foreground">
+                · {{ docMetaField(record.domainMetadata, 'title') || '未识别发明名称' }}
+              </span>
+            </template>
+            <template v-else>知识条目审核</template>
+          </template>
+        </Table.Column>
+        <Table.Column title="操作" :width="360" fixed="right">
+          <template #default="{ record }">
+            <Space>
+              <Button size="small" @click="selectDocument(record)">
+                {{ domainOf(record) === 'PATENT' ? '审核内容' : '审核条目' }}
+              </Button>
+              <Button size="small" @click="openDocumentTrace(record)">处理链路</Button>
+              <Button type="primary" size="small" @click="publishDocument(record)">发布</Button>
+              <Button danger size="small" @click="openRejectVersion(record)">驳回</Button>
+            </Space>
+          </template>
+        </Table.Column>
+      </Table>
+      <Empty v-if="!docsLoading && reviewDocs.length === 0" description="当前没有待审核文档" />
+    </Card>
+
+    <Card v-if="selectedDoc" size="small" class="mb-4">
+      <template #title>
+        <Space>
+          <span>{{ selectedDoc.name }}</span>
+          <Tag>{{ selectedDoc.versionNo || '-' }}</Tag>
+          <Tag :color="isPatentSelected ? 'blue' : 'default'">
+            {{ isPatentSelected ? '专利文档审核' : '知识条目审核' }}
+          </Tag>
+        </Space>
+      </template>
+
+      <template v-if="isPatentSelected">
+        <Descriptions bordered size="small" :column="3">
+          <Descriptions.Item label="申请号">{{ docMetaField(selectedDoc.domainMetadata, 'applicationNo') || '-' }}</Descriptions.Item>
+          <Descriptions.Item label="公布号">{{ docMetaField(selectedDoc.domainMetadata, 'publicationNo') || '-' }}</Descriptions.Item>
+          <Descriptions.Item label="发明名称">{{ docMetaField(selectedDoc.domainMetadata, 'title') || '-' }}</Descriptions.Item>
+          <Descriptions.Item label="申请人">{{ docMetaField(selectedDoc.domainMetadata, 'applicants') || '-' }}</Descriptions.Item>
+          <Descriptions.Item label="权利要求数">{{ docMetaField(selectedDoc.domainMetadata, 'claimCount') || '-' }}</Descriptions.Item>
+          <Descriptions.Item label="知识单元">{{ selectedDoc.chunkCount ?? '-' }}</Descriptions.Item>
+        </Descriptions>
+        <div class="mt-3 flex gap-2">
+          <Button @click="openDocumentTrace(selectedDoc)">查看正文与处理链路</Button>
+          <Button @click="openQuality(selectedDoc)">质量评测</Button>
+          <Button type="primary" @click="publishDocument(selectedDoc)">确认并发布</Button>
+          <Button danger @click="openRejectVersion(selectedDoc)">驳回版本</Button>
+        </div>
+      </template>
+
+      <template v-else>
+        <div class="mb-3 flex items-center justify-between">
+          <Space>
+            <Button
+              v-for="tab in tabs"
+              :key="tab.key"
+              :type="currentTab === tab.key ? 'primary' : 'default'"
+              size="small"
+              @click="handleTabChange(tab.key)"
+            >
+              {{ tab.label }}
+            </Button>
+          </Space>
+          <Space>
+            <Button @click="router.push({ path: '/ai/conflict', query: { docId: selectedDoc?.id } })">冲突处理</Button>
+            <Button @click="openQuality(selectedDoc)">质量评测</Button>
+            <Button type="primary" @click="publishDocument(selectedDoc)">发布当前版本</Button>
+          </Space>
+        </div>
+        <Grid>
+          <template #itemType="{ row }">
+            <Tag :color="ITEM_TYPE_TAG[row.itemType]?.color || 'default'">{{ ITEM_TYPE_TAG[row.itemType]?.text || row.itemType }}</Tag>
+          </template>
+          <template #riskLevel="{ row }">
+            <Tag :color="RISK_TAG[row.riskLevel]?.color || 'default'">{{ RISK_TAG[row.riskLevel]?.text || row.riskLevel }}</Tag>
+          </template>
+          <template #status="{ row }">
+            <Tag :color="STATUS_TAG[row.status]?.color || 'default'">{{ STATUS_TAG[row.status]?.text || row.status }}</Tag>
+          </template>
+          <template #chunkId="{ row }">
+            <a v-if="row.chunkId" @click="openChunkDetail(row.chunkId)">查看来源</a>
+            <span v-else class="text-muted-foreground">-</span>
+          </template>
+          <template #expand_content="{ row }">
+            <div class="whitespace-pre-wrap border-l-4 border-blue-500 px-3 py-4 leading-6">
+              {{ chunkContents[row.chunkId ?? -1] ?? (row.chunkId ? '来源内容加载中…' : '无匹配来源') }}
+            </div>
+          </template>
+          <template #actions="{ row }"><TableAction :actions="buildActions(row)" /></template>
+        </Grid>
+      </template>
+    </Card>
+
+    <Modal v-model:open="rejectOpen" title="驳回知识条目" @ok="confirmReject">
       <p class="mb-2 text-muted-foreground">{{ rejectRow?.title }}</p>
-      <a-textarea
-        v-model:value="rejectReason"
-        :rows="3"
-        placeholder="请填写驳回原因(必填)"
-      />
+      <a-textarea v-model:value="rejectReason" :rows="3" placeholder="请填写驳回原因" />
     </Modal>
 
-    <!-- 来源片段详情弹窗(点击片段 id 打开; 规范: antd Modal z-index 1000 + destroyOnClose) -->
-    <Modal
-      v-model:open="chunkDetailOpen"
-      title="片段详情"
-      width="720px"
-      :z-index="1000"
-      :destroy-on-close="true"
-      :footer="null"
-    >
+    <Modal v-model:open="rejectVersionOpen" title="驳回文档版本" @ok="confirmRejectVersion">
+      <p class="mb-2">{{ rejectDoc?.name }} · {{ rejectDoc?.versionNo }}</p>
+      <a-textarea v-model:value="rejectVersionReason" :rows="3" placeholder="请填写驳回原因；驳回后版本回到草稿态" />
+    </Modal>
+
+    <Modal v-model:open="chunkDetailOpen" title="来源内容" width="720px" :footer="null">
       <template v-if="chunkDetail">
-        <div class="mb-4">
-          <div class="mb-2 text-sm font-bold text-muted-foreground">片段内容：</div>
-          <div
-            class="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 leading-6"
-          >
-            {{ chunkDetail.content }}
-          </div>
+        <div class="max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 leading-6">
+          {{ chunkDetail.content }}
         </div>
-        <Descriptions :column="2" bordered size="small">
-          <Descriptions.Item label="片段 ID">
-            {{ chunkDetail.id }}
-          </Descriptions.Item>
-          <Descriptions.Item label="类型">
-            {{ chunkDetail.chunkType }}
-          </Descriptions.Item>
-          <Descriptions.Item label="所属文档">
-            {{ chunkDetail.documentName || chunkDetail.documentId || '-' }}
-          </Descriptions.Item>
-          <Descriptions.Item label="版本">
-            {{ chunkDetail.versionNo || '-' }}
-          </Descriptions.Item>
-          <Descriptions.Item label="状态">
-            {{ chunkDetail.status }}
-          </Descriptions.Item>
-          <Descriptions.Item label="父块">
-            {{ chunkDetail.parentId ?? '-' }}
-          </Descriptions.Item>
-          <Descriptions.Item label="元数据" :span="2">
-            {{ chunkDetail.metadata || '-' }}
-          </Descriptions.Item>
-        </Descriptions>
       </template>
     </Modal>
   </Page>
