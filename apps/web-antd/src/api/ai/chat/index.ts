@@ -1,4 +1,11 @@
+import { useAppConfig } from '@vben/hooks';
+import { fetchEventSource } from '@vben/request';
+import { useAccessStore } from '@vben/stores';
+
 import { requestClient } from '#/api/request';
+
+const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
+const accessStore = useAccessStore();
 
 /**
  * AI 客服对话工作台 API
@@ -32,6 +39,8 @@ export namespace AiChatApi {
     intent?: string; // 意图(USER 消息识别结果)
     confidence?: number; // 置信度 0~1(AI 消息)
     traceId?: string; // 链路追踪号(AI 消息, q- 前缀)
+    queryTraceId?: string; // 统一主追踪号(q- 前缀)
+    route?: string; // 权威检索路由(RULE/EXACT_METADATA/EXACT_CLAIM/SCOPED_RAG/HYBRID_RAG/ABSTAIN)
     evidence?: EvidenceSummary[]; // 证据快照(历史会话刷新后仍存在)
     createTime?: number | string;
   }
@@ -106,6 +115,70 @@ export namespace AiChatApi {
     finishedAt?: number | string;
     stages?: TraceStage[];
   }
+
+  /** SSE 流式对话事件(与后端 ChatStreamEvent 对齐) */
+  export interface ChatStreamEvent {
+    type: 'conversation' | 'stage' | 'evidence' | 'delta' | 'verification' | 'done' | 'error';
+    // conversation / done
+    conversationId?: number;
+    queryId?: string;
+    traceId?: string;
+    kbId?: number;
+    domainCode?: string;
+    // stage
+    stage?: string;
+    status?: string;
+    label?: string;
+    elapsedMs?: number;
+    inputSummary?: string;
+    outputSummary?: string;
+    errorCode?: string;
+    modelCallId?: string;
+    // evidence
+    count?: number;
+    items?: EvidenceSummary[];
+    // delta
+    content?: string;
+    // verification
+    verifyStatus?: string;
+    repairCount?: number;
+    // done
+    messageId?: number;
+    route?: string;
+    answerable?: boolean;
+    answer?: string;
+    citations?: number[];
+    evidence?: EvidenceSummary[];
+    confidence?: number;
+    latencyMs?: number;
+    degraded?: boolean;
+    transferRequired?: boolean;
+    transferReason?: string;
+    // error
+    code?: string;
+    message?: string;
+    retryable?: boolean;
+  }
+
+  /** 回答反馈(有用/无用) */
+  export interface Feedback {
+    id?: number;
+    messageId: number;
+    conversationId?: number;
+    queryTraceId?: string;
+    kbId?: number;
+    domainCode?: string;
+    rating: 'HELPFUL' | 'NOT_HELPFUL';
+    reasonCode?: string;
+    comment?: string;
+    route?: string;
+    intent?: string;
+    confidence?: number;
+    latencyMs?: number;
+    primaryDocumentId?: number;
+    createTime?: number | string;
+    updateTime?: number | string;
+  }
 }
 
 /** 发送对话消息(LLM 链路 10~60s, 超时放宽到 180s) */
@@ -174,14 +247,61 @@ export function getMyChatConversations(params: {
   );
 }
 
-/**
- * 创建反馈(点赞/点踩; 点踩自动生成评测考题闭环)
- * 权限: chat:chat:send
- */
-export function createFeedback(data: {
+/** 流式发送对话消息(SSE: conversation/stage/evidence/delta/verification/done/error) */
+export function sendChatMessageStream(
+  data: {
+    channel?: string;
+    conversationId?: number;
+    customerId?: string;
+    message: string;
+    kbId?: number;
+  },
+  handlers: {
+    onEvent: (event: AiChatApi.ChatStreamEvent) => void;
+    onError?: (err: Error) => void;
+    onClose?: () => void;
+    signal?: AbortSignal;
+  },
+) {
+  const token = accessStore.accessToken;
+  return fetchEventSource(`${apiURL}/chat/chat/stream`, {
+    method: 'post',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    openWhenHidden: true,
+    body: JSON.stringify(data),
+    signal: handlers.signal,
+    onmessage(msg) {
+      if (!msg.data) return;
+      try {
+        const event = JSON.parse(msg.data) as AiChatApi.ChatStreamEvent;
+        handlers.onEvent(event);
+      } catch {
+        // 忽略无法解析的 SSE 事件
+      }
+    },
+    onerror: (err) => {
+      handlers.onError?.(err as Error);
+    },
+    onclose: () => {
+      handlers.onClose?.();
+    },
+  });
+}
+
+/** 提交/更新回答反馈(Upsert; 点踩自动生成评测考题闭环) */
+export function upsertFeedback(data: {
   messageId: number;
-  type: 'THUMB_UP' | 'THUMB_DOWN';
-  note?: string;
+  rating: 'HELPFUL' | 'NOT_HELPFUL';
+  reasonCode?: string;
+  comment?: string;
 }) {
-  return requestClient.post<number>('/chat/feedback/create', data);
+  return requestClient.post<number>('/chat/feedback', data);
+}
+
+/** 查询消息的当前反馈(恢复已反馈状态) */
+export function getFeedbackByMessage(messageId: number) {
+  return requestClient.get<AiChatApi.Feedback | null>(`/chat/feedback/${messageId}`);
 }

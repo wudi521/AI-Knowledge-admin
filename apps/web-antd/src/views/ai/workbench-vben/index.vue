@@ -25,9 +25,11 @@ import {
   getChatHistory,
   getMyChatConversations,
   getQueryTrace,
-  sendChatMessage,
+  sendChatMessageStream,
 } from '#/api/ai/chat';
 import { getKnowledgeBasePage } from '#/api/ai/knowledge';
+import FeedbackBar from './modules/FeedbackBar.vue';
+import ThinkingPanel from './modules/ThinkingPanel.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -58,6 +60,20 @@ let historyRequestSequence = 0;
 let conversationListRequestSequence = 0;
 let sendRequestSequence = 0;
 let workspaceVersion = 0;
+
+/** 当前流式问答状态(占位消息 + 阶段流 + 停止控制器) */
+const streamCtrl = ref<AbortController>();
+const streamState = ref<{
+  messageId: number;
+  stages: Array<{
+    stage?: string;
+    status?: string;
+    label?: string;
+    elapsedMs?: number;
+  }>;
+  evidenceCount: number;
+  verifyStatus?: string;
+}>();
 
 function localId() {
   localSequence += 1;
@@ -214,6 +230,9 @@ async function loadConversations(isCurrent?: () => boolean) {
 }
 
 async function selectConversation(item: AiChatApi.Conversation) {
+  if (item.id !== currentConversationId.value) {
+    abortActiveStream(); // SSE-06: 切换会话前取消进行中的流, 释放后端 streamInflight
+  }
   invalidateWorkspace();
   const requestId = ++historyRequestSequence;
   const requestVersion = workspaceVersion;
@@ -259,6 +278,7 @@ async function selectConversation(item: AiChatApi.Conversation) {
 }
 
 function clearCurrentConversation() {
+  abortActiveStream(); // SSE-06: 新建会话/切换知识库前取消进行中的流
   invalidateWorkspace();
   currentConversationId.value = undefined;
   activeConversation.value = undefined;
@@ -337,67 +357,245 @@ async function send() {
   draft.value = '';
   scrollBottom();
 
-  try {
-    const resp = existingConversationId
-      ? await sendChatMessage({
-          conversationId: existingConversationId,
-          message: text,
-          channel: 'WEB',
-        })
-      : await sendChatMessage({
-          kbId: selectedKbId.value!,
-          message: text,
-          channel: 'WEB',
-        });
-    if (
-      requestId !== sendRequestSequence ||
-      requestVersion !== workspaceVersion
-    ) {
-      return;
-    }
-    lastResult.value = resp;
-    currentConversationId.value = resp.conversationId;
-    syncConversationUrl(resp.conversationId);
-    selectedKbId.value = resp.kbId ?? selectedKbId.value;
-    activeConversation.value = {
-      ...(previousConversation || {}),
-      id: resp.conversationId,
-      status: previousConversation?.status || 'ACTIVE',
-      kbId: resp.kbId ?? previousConversation?.kbId ?? selectedKbId.value,
-      domainCode:
-        resp.domainCode ??
-        previousConversation?.domainCode ??
-        selectedKb.value?.domainCode,
-    };
+  // 占位 AI 消息: 接收 stage/delta 实时更新, done 后替换为权威消息
+  const placeholderId = localId();
+  const placeholder: AiChatApi.Message = {
+    id: placeholderId,
+    role: 'AI',
+    content: '',
+    createTime: Date.now(),
+  };
+  messages.value.push(placeholder);
+  streamState.value = { messageId: placeholderId, stages: [], evidenceCount: 0 };
+  const ctrl = new AbortController();
+  streamCtrl.value = ctrl;
+  let finalized = false;
 
-    const reply =
-      resp.answer ||
-      resp.transferReason ||
-      '当前证据不足，暂时无法基于知识库给出可靠回答。';
-    messages.value.push({
-      id: resp.messageId ?? localId(),
-      role: 'AI',
-      content: reply,
-      citations: (resp.citations || []).map(String),
-      evidence: resp.evidence || undefined,
-      confidence: resp.confidence ?? undefined,
-      traceId: resp.traceId ?? undefined,
-      createTime: Date.now(),
-    });
-    await loadConversations(() =>
-      requestId === sendRequestSequence && requestVersion === workspaceVersion,
-    );
-    scrollBottom();
-  } catch {
-    // 全局请求拦截器负责提示；保留用户问题方便重试。
-  } finally {
+  const finalize = () => {
+    if (finalized) return;
+    finalized = true;
+    // 仅当本请求仍是当前请求时才复位发送状态; 旧请求(已被新会话/新请求取代)不得
+    // 清掉新请求的 streamCtrl/streamState(SSE-06 生命周期隔离)
     if (
       requestId === sendRequestSequence &&
       requestVersion === workspaceVersion
     ) {
       sending.value = false;
       nextTick(() => inputRef.value?.focus?.());
+      streamCtrl.value = undefined;
+      streamState.value = undefined;
     }
+    scrollBottom();
+  };
+
+  // SSE-07: 用户主动停止属于正常终态(CANCELLED), 不显示"系统异常/网络错误";
+  // 已产生的 partial answer 保留为"已停止生成", 不当作完整可作答结果(done 未到达, 无权威落库)。
+  const markStopped = () => {
+    if (
+      requestId !== sendRequestSequence ||
+      requestVersion !== workspaceVersion
+    ) {
+      return;
+    }
+    const index = messages.value.findIndex((m) => m.id === placeholderId);
+    if (index >= 0 && !messages.value[index]!.content) {
+      messages.value[index]!.content = '已停止生成';
+    }
+  };
+
+  try {
+    await sendChatMessageStream(
+      existingConversationId
+        ? { conversationId: existingConversationId, message: text, channel: 'WEB' }
+        : { kbId: selectedKbId.value!, message: text, channel: 'WEB' },
+      {
+        signal: ctrl.signal,
+        onEvent: (event) => {
+          if (
+            requestId !== sendRequestSequence ||
+            requestVersion !== workspaceVersion
+          ) {
+            return;
+          }
+          switch (event.type) {
+            case 'conversation': {
+              currentConversationId.value = event.conversationId;
+              syncConversationUrl(event.conversationId);
+              activeConversation.value = {
+                ...(previousConversation || {}),
+                id: event.conversationId!,
+                status: previousConversation?.status || 'ACTIVE',
+                kbId:
+                  event.kbId ??
+                  previousConversation?.kbId ??
+                  selectedKbId.value,
+                domainCode:
+                  event.domainCode ??
+                  previousConversation?.domainCode ??
+                  selectedKb.value?.domainCode,
+              };
+              break;
+            }
+            case 'stage': {
+              if (streamState.value) {
+                const list = streamState.value.stages;
+                const index = list.findIndex((s) => s.stage === event.stage);
+                const item = {
+                  stage: event.stage,
+                  status: event.status,
+                  label: event.label,
+                  elapsedMs: event.elapsedMs,
+                };
+                if (index >= 0) {
+                  list[index] = item;
+                } else {
+                  list.push(item);
+                }
+              }
+              break;
+            }
+            case 'evidence': {
+              if (streamState.value) {
+                streamState.value.evidenceCount = event.count ?? 0;
+                const index = messages.value.findIndex(
+                  (m) => m.id === placeholderId,
+                );
+                if (index >= 0) {
+                  messages.value[index]!.evidence = event.items;
+                }
+              }
+              break;
+            }
+            case 'delta': {
+              if (streamState.value) {
+                const index = messages.value.findIndex(
+                  (m) => m.id === placeholderId,
+                );
+                if (index >= 0) {
+                  messages.value[index]!.content += event.content || '';
+                }
+              }
+              break;
+            }
+            case 'verification': {
+              if (streamState.value) {
+                streamState.value.verifyStatus = event.verifyStatus;
+              }
+              break;
+            }
+            case 'done': {
+              lastResult.value = {
+                conversationId: event.conversationId,
+                messageId: event.messageId,
+                route: event.route,
+                answer: event.answer,
+                answerable: event.answerable,
+                citations: event.citations,
+                evidence: event.evidence,
+                confidence: event.confidence,
+                traceId: event.traceId,
+                latencyMs: event.latencyMs,
+                degraded: event.degraded,
+                transferRequired: event.transferRequired,
+                transferReason: event.transferReason,
+              } as AiChatApi.SendResp;
+              currentConversationId.value = event.conversationId;
+              syncConversationUrl(event.conversationId);
+              const index = messages.value.findIndex(
+                (m) => m.id === placeholderId,
+              );
+              if (index >= 0) {
+                const reply =
+                  event.answer ||
+                  event.transferReason ||
+                  '当前证据不足，暂时无法基于知识库给出可靠回答。';
+                messages.value[index]! = {
+                  id: event.messageId ?? placeholderId,
+                  role: 'AI',
+                  content: reply,
+                  citations: (event.citations || []).map(String),
+                  evidence: event.evidence || undefined,
+                  confidence: event.confidence ?? undefined,
+                  traceId: event.traceId ?? undefined,
+                  queryTraceId: event.traceId ?? undefined,
+                  route: event.route,
+                  createTime: Date.now(),
+                };
+              }
+              void loadConversations(
+                () =>
+                  requestId === sendRequestSequence &&
+                  requestVersion === workspaceVersion,
+              );
+              finalize();
+              break;
+            }
+            case 'error': {
+              const index = messages.value.findIndex(
+                (m) => m.id === placeholderId,
+              );
+              if (index >= 0) {
+                messages.value[index]!.content =
+                  event.message || '处理失败，请稍后重试';
+              }
+              finalize();
+              break;
+            }
+          }
+        },
+        onError: () => {
+          // SSE-07: 用户主动停止(AbortError)不视为系统/网络错误
+          if (ctrl.signal.aborted) {
+            markStopped();
+          } else if (
+            requestId === sendRequestSequence &&
+            requestVersion === workspaceVersion
+          ) {
+            const index = messages.value.findIndex(
+              (m) => m.id === placeholderId,
+            );
+            if (index >= 0 && !messages.value[index]!.content) {
+              messages.value[index]!.content = '请求中断，请重试';
+            }
+          }
+          finalize();
+        },
+        onClose: () => {
+          if (
+            requestId === sendRequestSequence &&
+            requestVersion === workspaceVersion &&
+            streamState.value
+          ) {
+            markStopped();
+          }
+          finalize();
+        },
+      },
+    );
+  } catch {
+    // 全局请求拦截器负责提示；保留用户问题方便重试。
+    finalize();
+  }
+  // SSE-06/07: @microsoft/fetch-event-source 在 signal.abort() 时只 dispose()+resolve(),
+  // 既不触发 onerror 也不触发 onclose。必须在 await 正常返回后显式收尾, 否则 UI 会
+  // 一直卡在"停止生成"状态(发送按钮/思考面板不恢复)。
+  if (ctrl.signal.aborted) {
+    markStopped();
+  }
+  finalize();
+}
+
+/** 停止当前流式生成(AbortController → 服务端取消后续 Generate/Verify) */
+function stopStream() {
+  streamCtrl.value?.abort();
+}
+
+/** SSE-06: 切换/新建会话时取消进行中的流, 并立即清空 streamCtrl 让"停止生成"按钮退出 */
+function abortActiveStream() {
+  const ctrl = streamCtrl.value;
+  if (ctrl) {
+    ctrl.abort();
+    streamCtrl.value = undefined;
   }
 }
 
@@ -595,26 +793,24 @@ onMounted(async () => {
                           查看本次执行链路 →
                         </Button>
                       </div>
+
+                      <!-- P0-10B: 流式执行过程面板(与 Query Trace 同源) -->
+                      <ThinkingPanel
+                        v-if="streamState && streamState.messageId === msg.id"
+                        :stages="streamState.stages"
+                        :running="true"
+                        :evidence-count="streamState.evidenceCount"
+                        :verify-status="streamState.verifyStatus"
+                      />
+
+                      <!-- P0-10C: 有用/无用反馈(仅真实完成的 AI 消息) -->
+                      <FeedbackBar
+                        v-if="msg.role === 'AI' && msg.id > 0"
+                        :message-id="msg.id"
+                      />
                     </div>
                   </div>
                 </template>
-              </div>
-
-              <div v-if="sending" class="wb-msg ai">
-                <div class="wb-avatar-wrap">
-                  <Avatar :size="38" class="wb-avatar ai">AI</Avatar>
-                </div>
-                <div class="wb-msg-main">
-                  <div class="wb-msg-head">
-                    <span class="wb-msg-name">知识助手</span>
-                  </div>
-                  <div class="wb-msg-bubble ai wb-typing-bubble">
-                    <span class="wb-typing-dot"></span>
-                    <span class="wb-typing-dot"></span>
-                    <span class="wb-typing-dot"></span>
-                    <span class="wb-typing-text">正在检索知识并生成回答…</span>
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -637,6 +833,15 @@ onMounted(async () => {
                   }}
                 </span>
                 <Button
+                  v-if="streamCtrl"
+                  danger
+                  :loading="false"
+                  @click="stopStream"
+                >
+                  停止生成
+                </Button>
+                <Button
+                  v-else
                   type="primary"
                   :loading="sending"
                   :disabled="
