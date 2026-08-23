@@ -56,7 +56,13 @@ function formatTime(value?: number | string): string {
   if (value == null || value === '') return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleString('zh-CN', {
+    hour12: false,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function scrollBottom() {
@@ -203,119 +209,549 @@ onMounted(async () => {
     title="知识问答工作台"
     description="选择知识库后进行真实问答，查看引用证据和本次执行链路。具体模型由模型网关按场景自动选择。"
   >
-    <div class="mb-4 flex flex-wrap items-center gap-2">
-      <Select
-        v-model:value="selectedKbId"
-        :options="kbOptions"
-        :loading="kbLoading"
-        placeholder="选择知识库"
-        style="width: 320px"
-        show-search
-        option-filter-prop="label"
+    <div class="qa-workbench">
+      <div class="workbench-toolbar">
+        <div class="toolbar-main">
+          <Select
+            v-model:value="selectedKbId"
+            :options="kbOptions"
+            :loading="kbLoading"
+            placeholder="选择知识库"
+            class="kb-select"
+            show-search
+            option-filter-prop="label"
+          />
+          <Tag v-if="selectedKb?.domainCode === 'PATENT'" color="blue">专利知识问答</Tag>
+          <Tag v-else-if="selectedKbId" color="default">通用知识问答</Tag>
+          <span class="gateway-hint">模型由 AI 运行时自动路由</span>
+        </div>
+        <Button type="primary" @click="newConversation">新建会话</Button>
+      </div>
+
+      <Alert
+        v-if="!selectedKbId"
+        class="mb-4"
+        type="info"
+        show-icon
+        message="先选择一个知识库。问答只使用该知识库已发布的内容，不会跨库检索。"
       />
-      <Tag v-if="selectedKb?.domainCode === 'PATENT'" color="blue">专利知识问答</Tag>
-      <Tag v-else-if="selectedKbId" color="default">通用知识问答</Tag>
-      <span class="text-xs text-muted-foreground">运行模型由 AI 运行时 / 模型网关决定</span>
-      <Button class="ml-auto" type="primary" @click="newConversation">新建会话</Button>
-    </div>
 
-    <Alert
-      v-if="!selectedKbId"
-      class="mb-4"
-      type="info"
-      show-icon
-      message="先选择一个知识库。问答只使用该知识库已发布的内容，不会跨库检索。"
-    />
-
-    <Row :gutter="16" class="workbench-body">
-      <Col :span="5">
-        <Card title="历史会话" size="small" class="h-full">
-          <List :data-source="conversations" :loading="loadingConversations" size="small">
-            <template #renderItem="{ item }">
-              <List.Item
-                class="cursor-pointer"
-                :class="{ 'conversation-active': item.id === currentConversationId }"
-                @click="selectConversation(item)"
-              >
-                <div class="w-full">
-                  <div class="flex items-center justify-between">
-                    <span class="font-medium">会话 #{{ item.id }}</span>
-                    <Tag :color="item.status === 'CLOSED' ? 'default' : 'blue'">
-                      {{ item.status === 'CLOSED' ? '已结束' : '进行中' }}
-                    </Tag>
-                  </div>
-                  <div class="mt-1 text-xs text-muted-foreground">{{ formatTime(item.createTime) }}</div>
-                </div>
-              </List.Item>
-            </template>
-          </List>
-        </Card>
-      </Col>
-
-      <Col :span="19">
-        <Card size="small" class="h-full">
-          <template #title>
-            <Space>
-              <span>{{ currentConversation ? `会话 #${currentConversation.id}` : '新会话' }}</span>
-              <Tag v-if="selectedKb">{{ selectedKb.label }}</Tag>
-            </Space>
-          </template>
-
-          <div ref="chatBox" class="chat-box">
-            <Empty v-if="messages.length === 0 && !loadingHistory" description="输入一个基于知识库的问题开始问答" />
-            <div v-for="msg in messages" :key="msg.id" class="message-row" :class="`message-${msg.role.toLowerCase()}`">
-              <div class="message-role">{{ msg.role === 'USER' ? '你' : msg.role === 'AI' ? '知识助手' : '系统' }}</div>
-              <div class="message-card">
-                <div class="whitespace-pre-wrap leading-7">{{ msg.content }}</div>
-                <div v-if="msg.role === 'AI' && msg.confidence != null" class="mt-2 text-xs text-muted-foreground">
-                  证据置信度 {{ Math.round(msg.confidence * 100) }}%
-                </div>
-                <div v-if="msg.evidenceList?.length" class="mt-3 flex flex-col gap-2">
-                  <div class="text-xs font-medium text-muted-foreground">引用来源</div>
-                  <Card v-for="(ev, index) in msg.evidenceList" :key="ev.chunkId || index" size="small">
-                    <div class="mb-1 flex items-center gap-2">
-                      <Tag color="blue">C{{ index + 1 }}</Tag>
-                      <span class="font-medium">{{ evidenceTitle(ev) }}</span>
-                      <span v-if="evidenceMeta(ev, 'pageStart')" class="text-xs text-muted-foreground">第 {{ evidenceMeta(ev, 'pageStart') }} 页</span>
+      <Row :gutter="16" class="workbench-body">
+        <Col :span="5">
+          <Card title="历史会话" size="small" class="history-card h-full">
+            <List :data-source="conversations" :loading="loadingConversations" size="small">
+              <template #renderItem="{ item }">
+                <List.Item
+                  class="conversation-item cursor-pointer"
+                  :class="{ 'conversation-active': item.id === currentConversationId }"
+                  @click="selectConversation(item)"
+                >
+                  <div class="w-full">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="truncate font-medium">会话 #{{ item.id }}</span>
+                      <Tag :color="item.status === 'CLOSED' ? 'default' : 'blue'">
+                        {{ item.status === 'CLOSED' ? '已结束' : '进行中' }}
+                      </Tag>
                     </div>
-                    <div class="line-clamp-3 text-sm text-muted-foreground">{{ ev.content || '来源内容未返回' }}</div>
-                  </Card>
+                    <div class="mt-1 text-xs text-muted-foreground">{{ formatTime(item.createTime) }}</div>
+                  </div>
+                </List.Item>
+              </template>
+            </List>
+          </Card>
+        </Col>
+
+        <Col :span="19">
+          <Card size="small" class="chat-panel h-full">
+            <template #title>
+              <div class="chat-header">
+                <Space>
+                  <span class="chat-title">{{ currentConversation ? `会话 #${currentConversation.id}` : '新会话' }}</span>
+                  <Tag v-if="selectedKb">{{ selectedKb.label }}</Tag>
+                </Space>
+                <span v-if="currentConversation" class="chat-subtitle">基于已发布知识回答</span>
+              </div>
+            </template>
+
+            <div ref="chatBox" class="chat-box">
+              <Empty
+                v-if="messages.length === 0 && !loadingHistory"
+                class="chat-empty"
+                description="输入一个基于知识库的问题开始问答"
+              />
+
+              <div
+                v-for="msg in messages"
+                :key="msg.id"
+                class="message-row"
+                :class="`message-${msg.role.toLowerCase()}`"
+              >
+                <div class="message-role">
+                  <span class="role-dot"></span>
+                  {{ msg.role === 'USER' ? '你' : msg.role === 'AI' ? '知识助手' : '系统' }}
                 </div>
-                <div v-if="msg.role === 'AI' && msg.traceId" class="mt-3">
-                  <Button type="link" size="small" class="p-0" @click="openTrace(msg.traceId)">查看本次执行链路 →</Button>
+
+                <div class="message-card">
+                  <div class="message-content whitespace-pre-wrap">{{ msg.content }}</div>
+
+                  <div
+                    v-if="msg.role === 'AI' && msg.confidence != null"
+                    class="answer-meta"
+                  >
+                    <span>证据置信度</span>
+                    <strong>{{ Math.round(msg.confidence * 100) }}%</strong>
+                  </div>
+
+                  <div v-if="msg.evidenceList?.length" class="evidence-section">
+                    <div class="evidence-heading">引用来源</div>
+                    <div
+                      v-for="(ev, index) in msg.evidenceList"
+                      :key="ev.chunkId || index"
+                      class="evidence-item"
+                    >
+                      <div class="evidence-topline">
+                        <span class="citation-index">C{{ index + 1 }}</span>
+                        <span class="evidence-title">{{ evidenceTitle(ev) }}</span>
+                        <span
+                          v-if="evidenceMeta(ev, 'pageStart')"
+                          class="evidence-page"
+                        >
+                          第 {{ evidenceMeta(ev, 'pageStart') }} 页
+                        </span>
+                      </div>
+                      <div class="evidence-content line-clamp-3">
+                        {{ ev.content || '来源内容未返回' }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-if="msg.role === 'AI' && msg.traceId" class="trace-action">
+                    <Button
+                      type="link"
+                      size="small"
+                      class="!h-auto !p-0"
+                      @click="openTrace(msg.traceId)"
+                    >
+                      查看本次执行链路 →
+                    </Button>
+                  </div>
                 </div>
               </div>
+
+              <div v-if="sending" class="thinking-row">
+                <span class="thinking-dot"></span>
+                正在检索知识并生成回答…
+              </div>
             </div>
-            <div v-if="sending" class="text-sm text-muted-foreground">正在检索知识并生成回答…</div>
-          </div>
 
-          <div class="mt-3 flex gap-2">
-            <Input.TextArea
-              v-model:value="draft"
-              :rows="3"
-              :disabled="!selectedKbId || sending"
-              placeholder="输入问题。Enter 换行，点击发送提交。"
-            />
-            <Button type="primary" :loading="sending" :disabled="!selectedKbId || !draft.trim()" @click="send">发送</Button>
-          </div>
+            <div class="composer">
+              <Input.TextArea
+                v-model:value="draft"
+                :rows="3"
+                :disabled="!selectedKbId || sending"
+                placeholder="输入问题，例如：CN 122621758 A 一共有几项权利要求？"
+                class="composer-input"
+              />
+              <div class="composer-footer">
+                <span class="composer-hint">回答会附带可追溯证据，不满足证据门禁时不会猜测。</span>
+                <Button
+                  type="primary"
+                  :loading="sending"
+                  :disabled="!selectedKbId || !draft.trim()"
+                  @click="send"
+                >
+                  发送
+                </Button>
+              </div>
+            </div>
 
-          <div v-if="lastResult && lastResult.answerable === false" class="mt-2 text-xs text-muted-foreground">
-            本次未满足可靠作答条件。系统不会为了“看起来有答案”而跳过证据门禁。
-            <a v-if="lastResult.traceId" class="ml-1" @click="openTrace(lastResult.traceId)">查看原因</a>
-          </div>
-        </Card>
-      </Col>
-    </Row>
+            <div
+              v-if="lastResult && lastResult.answerable === false"
+              class="answer-blocked-tip"
+            >
+              本次未满足可靠作答条件。系统不会为了“看起来有答案”而跳过证据门禁。
+              <a v-if="lastResult.traceId" class="ml-1" @click="openTrace(lastResult.traceId)">查看原因</a>
+            </div>
+          </Card>
+        </Col>
+      </Row>
+    </div>
   </Page>
 </template>
 
 <style scoped>
-.workbench-body { min-height: 620px; }
-.chat-box { min-height: 500px; max-height: 62vh; overflow-y: auto; padding: 8px; }
-.message-row { margin-bottom: 16px; }
-.message-role { margin-bottom: 4px; font-size: 12px; color: #8a8a8e; }
-.message-card { border: 1px solid var(--ant-color-border, #e5e7eb); border-radius: 10px; padding: 12px 14px; background: var(--ant-color-bg-container, #fff); }
-.message-user .message-card { margin-left: 16%; }
-.message-ai .message-card { margin-right: 10%; }
-.conversation-active { background: rgba(59, 130, 246, 0.08); border-radius: 6px; }
+.qa-workbench {
+  --qa-surface: #ffffff;
+  --qa-surface-soft: #f8fafc;
+  --qa-surface-raised: #ffffff;
+  --qa-border: #e5e7eb;
+  --qa-border-soft: #edf0f3;
+  --qa-text: #111827;
+  --qa-text-secondary: #667085;
+  --qa-user-bg: #eef5ff;
+  --qa-user-border: #d7e6ff;
+  --qa-ai-bg: #ffffff;
+  --qa-evidence-bg: #f8fafc;
+  --qa-primary-soft: rgba(22, 119, 255, 0.08);
+
+  color: var(--qa-text);
+}
+
+.workbench-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.toolbar-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+}
+
+.kb-select {
+  width: min(360px, 42vw);
+}
+
+.gateway-hint,
+.chat-subtitle,
+.composer-hint {
+  color: var(--qa-text-secondary);
+  font-size: 12px;
+}
+
+.workbench-body {
+  min-height: 640px;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.chat-title {
+  font-weight: 600;
+}
+
+.chat-box {
+  min-height: 500px;
+  max-height: 61vh;
+  overflow-y: auto;
+  padding: 22px 18px 8px;
+  scroll-behavior: smooth;
+}
+
+.chat-box::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-box::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(120, 126, 138, 0.35);
+}
+
+.chat-empty {
+  padding-top: 130px;
+}
+
+.message-row {
+  margin-bottom: 22px;
+}
+
+.message-role {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+  color: var(--qa-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.role-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #94a3b8;
+}
+
+.message-ai .role-dot {
+  background: #1677ff;
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.11);
+}
+
+.message-user .message-role {
+  justify-content: flex-end;
+}
+
+.message-user .role-dot {
+  order: 2;
+}
+
+.message-card {
+  max-width: 88%;
+  border: 1px solid var(--qa-border-soft);
+  border-radius: 14px;
+  padding: 15px 17px;
+  background: var(--qa-ai-bg);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+}
+
+.message-content {
+  color: var(--qa-text);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.message-user .message-card {
+  margin-left: auto;
+  border-color: var(--qa-user-border);
+  background: var(--qa-user-bg);
+}
+
+.message-ai .message-card {
+  margin-right: auto;
+}
+
+.answer-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: var(--qa-primary-soft);
+  color: var(--qa-text-secondary);
+  font-size: 12px;
+}
+
+.answer-meta strong {
+  color: #1677ff;
+  font-weight: 600;
+}
+
+.evidence-section {
+  margin-top: 15px;
+  border-top: 1px solid var(--qa-border-soft);
+  padding-top: 13px;
+}
+
+.evidence-heading {
+  margin-bottom: 8px;
+  color: var(--qa-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.evidence-item {
+  margin-top: 8px;
+  border: 1px solid var(--qa-border-soft);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--qa-evidence-bg);
+}
+
+.evidence-topline {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.citation-index {
+  flex: none;
+  border-radius: 5px;
+  padding: 2px 6px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.evidence-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--qa-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-page {
+  flex: none;
+  color: var(--qa-text-secondary);
+  font-size: 11px;
+}
+
+.evidence-content {
+  margin-top: 6px;
+  color: var(--qa-text-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.trace-action {
+  margin-top: 12px;
+}
+
+.thinking-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 20px;
+  color: var(--qa-text-secondary);
+  font-size: 13px;
+}
+
+.thinking-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #1677ff;
+  animation: qa-pulse 1.3s ease-in-out infinite;
+}
+
+.composer {
+  margin: 10px 18px 6px;
+  border: 1px solid var(--qa-border);
+  border-radius: 14px;
+  padding: 9px;
+  background: var(--qa-surface-raised);
+  box-shadow: 0 4px 18px rgba(16, 24, 40, 0.05);
+}
+
+.composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 3px 1px 7px;
+}
+
+.answer-blocked-tip {
+  margin: 8px 18px 14px;
+  color: var(--qa-text-secondary);
+  font-size: 12px;
+}
+
+.conversation-item {
+  margin: 2px 0;
+  border-radius: 8px;
+  padding: 10px !important;
+  transition: background 0.15s ease;
+}
+
+.conversation-item:hover {
+  background: var(--qa-surface-soft);
+}
+
+.conversation-active {
+  background: var(--qa-primary-soft) !important;
+}
+
+@keyframes qa-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+/* Ant Design 内部输入框在某些主题组合下没有跟随暗色，这里只约束本工作台。 */
+.qa-workbench :deep(.composer-input.ant-input) {
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  color: var(--qa-text) !important;
+  resize: none;
+}
+
+.qa-workbench :deep(.composer-input.ant-input::placeholder) {
+  color: var(--qa-text-secondary) !important;
+  opacity: 0.72;
+}
+
+/* 暗色模式：不再依赖 --ant-color-bg-container fallback，避免白色大卡片。 */
+:global(.dark) .qa-workbench {
+  --qa-surface: #15171a;
+  --qa-surface-soft: #1d2025;
+  --qa-surface-raised: #191c20;
+  --qa-border: #343841;
+  --qa-border-soft: #2a2e35;
+  --qa-text: #e7e9ee;
+  --qa-text-secondary: #9299a6;
+  --qa-user-bg: #202b3c;
+  --qa-user-border: #2d4160;
+  --qa-ai-bg: #1a1d21;
+  --qa-evidence-bg: #16191d;
+  --qa-primary-soft: rgba(64, 150, 255, 0.12);
+}
+
+:global(.dark) .qa-workbench :deep(.ant-card) {
+  border-color: var(--qa-border-soft);
+  background: var(--qa-surface);
+}
+
+:global(.dark) .qa-workbench :deep(.ant-card-head) {
+  border-bottom-color: var(--qa-border-soft);
+  color: var(--qa-text);
+}
+
+:global(.dark) .qa-workbench :deep(.ant-list-item) {
+  border-block-end-color: var(--qa-border-soft);
+  color: var(--qa-text);
+}
+
+:global(.dark) .qa-workbench :deep(.ant-empty-description) {
+  color: var(--qa-text-secondary);
+}
+
+:global(.dark) .qa-workbench :deep(.ant-select-selector),
+:global(.dark) .qa-workbench :deep(.ant-input),
+:global(.dark) .qa-workbench :deep(textarea.ant-input) {
+  border-color: var(--qa-border) !important;
+  background: var(--qa-surface-raised) !important;
+  color: var(--qa-text) !important;
+}
+
+:global(.dark) .qa-workbench :deep(.composer-input.ant-input) {
+  background: transparent !important;
+}
+
+:global(.dark) .qa-workbench :deep(.ant-select-selection-placeholder),
+:global(.dark) .qa-workbench :deep(.ant-select-selection-item) {
+  color: var(--qa-text-secondary);
+}
+
+:global(.dark) .qa-workbench :deep(.ant-btn-default) {
+  border-color: var(--qa-border);
+  background: var(--qa-surface-raised);
+  color: var(--qa-text);
+}
+
+:global(.dark) .qa-workbench .message-card {
+  box-shadow: none;
+}
+
+:global(.dark) .qa-workbench .composer {
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+
+@media (max-width: 1100px) {
+  .gateway-hint,
+  .chat-subtitle,
+  .composer-hint {
+    display: none;
+  }
+
+  .message-card {
+    max-width: 96%;
+  }
+}
 </style>
