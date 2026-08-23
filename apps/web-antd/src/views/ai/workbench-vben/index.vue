@@ -9,10 +9,12 @@ import {
   Button,
   Card,
   Col,
+  Drawer,
   Empty,
   Input,
   List,
   message,
+  Modal,
   Row,
   Select,
   Space,
@@ -22,6 +24,7 @@ import {
 import {
   getChatHistory,
   getMyChatConversations,
+  getQueryTrace,
   sendChatMessage,
 } from '#/api/ai/chat';
 import { getKnowledgeBasePage } from '#/api/ai/knowledge';
@@ -45,6 +48,8 @@ const kbOptions = ref<
   { label: string; value: number; domainCode?: string }[]
 >([]);
 const lastResult = ref<AiChatApi.SendResp>();
+const traceDrawerOpen = ref(false);
+const currentTrace = ref<AiChatApi.QueryTrace>();
 const chatBox = ref<HTMLElement>();
 const inputRef = ref<{ focus?: () => void }>();
 
@@ -143,22 +148,15 @@ function scrollBottom() {
 }
 
 function evidenceMeta(ev: AiChatApi.EvidenceSummary, key: string): any {
-  if (!ev.chunkMetadata) return null;
-  try {
-    return JSON.parse(ev.chunkMetadata)[key] ?? null;
-  } catch {
-    return null;
-  }
+  return (ev as any)[key] ?? null;
 }
 
 function evidenceTitle(ev: AiChatApi.EvidenceSummary): string {
-  const publicationNo = evidenceMeta(ev, 'publicationNo');
-  const applicationNo = evidenceMeta(ev, 'applicationNo');
-  const claimNo = evidenceMeta(ev, 'claimNo');
-  const section =
-    evidenceMeta(ev, 'sectionTitle') || evidenceMeta(ev, 'sectionType');
-  const identity =
-    publicationNo || applicationNo || ev.documentName || '来源文档';
+  const publicationNo = ev.publicationNo;
+  const applicationNo = ev.applicationNo;
+  const claimNo = ev.claimNo;
+  const section = ev.sectionTitle || ev.sectionType;
+  const identity = publicationNo || applicationNo || ev.documentName || '来源文档';
   if (claimNo) return `${identity} · 权利要求 ${claimNo}`;
   if (section) return `${identity} · ${section}`;
   return identity;
@@ -285,16 +283,30 @@ function handleKbChange(nextKbId: number | undefined) {
     nextKbId != null && Number.isFinite(nextKbId) ? nextKbId : undefined;
   const conversationKbId = currentConversation.value?.kbId;
   const hasCurrentConversation = currentConversationId.value != null;
+  // P0-10: 切换知识库不能修改当前会话, 必须先确认开始新会话
+  if (hasCurrentConversation && conversationKbId !== normalizedKbId) {
+    const previousKbId = selectedKbId.value;
+    Modal.confirm({
+      title: '切换知识库将开始新会话',
+      content: '当前会话绑定的知识库不会被修改，确认后开始一个新会话。',
+      onOk: () => {
+        selectedKbId.value = normalizedKbId;
+        clearCurrentConversation();
+        invalidatePendingSend();
+      },
+      onCancel: () => {
+        selectedKbId.value = previousKbId;
+      },
+    });
+    return;
+  }
   const kbChanged = selectedKbId.value !== normalizedKbId;
   if (kbChanged && loadingHistory.value) {
     invalidateWorkspace();
-  } else if (kbChanged && (!hasCurrentConversation || conversationKbId === normalizedKbId)) {
+  } else if (kbChanged) {
     invalidatePendingSend();
   }
   selectedKbId.value = normalizedKbId;
-  if (hasCurrentConversation && conversationKbId !== normalizedKbId) {
-    clearCurrentConversation();
-  }
 }
 
 function newConversation() {
@@ -389,9 +401,15 @@ async function send() {
   }
 }
 
-function openTrace(traceId?: string | null) {
+async function openTrace(traceId?: string | null) {
   if (!traceId) return;
-  router.push({ path: '/kb/ops/query-trace', query: { traceId } });
+  currentTrace.value = undefined;
+  traceDrawerOpen.value = true;
+  try {
+    currentTrace.value = await getQueryTrace(traceId);
+  } catch {
+    message.error('执行链路查询失败');
+  }
 }
 
 onMounted(async () => {
@@ -638,11 +656,69 @@ onMounted(async () => {
               v-if="lastResult && lastResult.answerable === false"
               class="wb-answer-blocked"
             >
-              本次未满足可靠作答条件。系统不会跳过证据门禁进行猜测。
+              <template v-if="lastResult.degraded">
+                本次查询超时或未能完成可靠回答，请稍后重试或调整问题。
+              </template>
+              <template v-else-if="lastResult.transferReason">
+                {{ lastResult.transferReason }}
+              </template>
+              <template v-else>
+                当前知识库中没有足够证据支持可靠回答。
+              </template>
               <a v-if="lastResult.traceId" @click="openTrace(lastResult.traceId)">
-                查看原因
+                查看本次执行链路
               </a>
             </div>
+
+            <Drawer
+              v-model:open="traceDrawerOpen"
+              title="本次执行链路"
+              width="640"
+            >
+              <div v-if="currentTrace" class="wb-trace-detail">
+                <div class="wb-trace-meta">
+                  <div><b>问题：</b>{{ currentTrace.query }}</div>
+                  <div>
+                    <b>路由：</b>
+                    <Tag>{{ currentTrace.route || '-' }}</Tag>
+                    <b>状态：</b>
+                    <Tag :color="currentTrace.status === 'SUCCEEDED' ? 'green' : 'orange'">
+                      {{ currentTrace.status || '-' }}
+                    </Tag>
+                    <b>总耗时：</b>{{ currentTrace.totalMs ?? '-' }} ms
+                  </div>
+                </div>
+                <div
+                  v-for="stage in currentTrace.stages || []"
+                  :key="stage.seq"
+                  class="wb-trace-stage"
+                >
+                  <div class="wb-trace-stage-head">
+                    <span class="wb-trace-stage-name">
+                      {{ stage.seq }}. {{ stage.stage }}
+                    </span>
+                    <Tag
+                      :color="
+                        stage.status === 'SUCCEEDED'
+                          ? 'green'
+                          : stage.status === 'FAILED'
+                            ? 'red'
+                            : 'default'
+                      "
+                    >
+                      {{ stage.status || '-' }}
+                    </Tag>
+                    <span class="wb-trace-stage-ms">
+                      {{ stage.elapsedMs ?? 0 }} ms
+                    </span>
+                  </div>
+                  <div v-if="stage.errorMessage" class="wb-trace-stage-err">
+                    {{ stage.errorMessage }}
+                  </div>
+                </div>
+              </div>
+              <Empty v-else description="暂无执行链路数据" />
+            </Drawer>
           </Card>
         </Col>
       </Row>
@@ -1070,5 +1146,50 @@ html.dark .wb-answer-blocked {
   .wb-msg-main {
     max-width: 90%;
   }
+}
+
+/* P0-09: 查看本次执行链路抽屉 */
+.wb-trace-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.wb-trace-meta {
+  padding: 12px;
+  border-radius: 8px;
+  background: #f6f7f9;
+  line-height: 1.9;
+}
+html.dark .wb-trace-meta {
+  background: #1c1f26;
+}
+.wb-trace-stage {
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+html.dark .wb-trace-stage {
+  border-color: #2a2e37;
+}
+.wb-trace-stage-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wb-trace-stage-name {
+  font-weight: 600;
+  flex: 1;
+}
+.wb-trace-stage-ms {
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+}
+.wb-trace-stage-err {
+  margin-top: 6px;
+  color: #dc2626;
+  font-size: 12px;
+}
+html.dark .wb-trace-stage-err {
+  color: #f87171;
 }
 </style>

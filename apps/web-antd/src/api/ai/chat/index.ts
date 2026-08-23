@@ -31,18 +31,30 @@ export namespace AiChatApi {
     citations?: string[]; // 引用证据 chunkId 列表(为空返回空列表)
     intent?: string; // 意图(USER 消息识别结果)
     confidence?: number; // 置信度 0~1(AI 消息)
-    traceId?: string; // 证据链路追踪号(AI 消息)
-    evidence?: EvidenceSummary[]; // 证据摘要(专利来源卡片)
+    traceId?: string; // 链路追踪号(AI 消息, q- 前缀)
+    evidence?: EvidenceSummary[]; // 证据快照(历史会话刷新后仍存在)
     createTime?: number | string;
   }
 
-  /** 证据摘要(来源卡片数据; 专利: 申请号/公布号/章节/权利要求号/页码) */
+  /** 统一证据 DTO(商用化: 结构化字段, 不含 vector/milvus/bm25 内部信息) */
   export interface EvidenceSummary {
+    evidenceId?: number;
     chunkId?: number;
+    documentId?: number;
     documentName?: string;
+    versionId?: number;
     versionNo?: string;
-    chunkMetadata?: string; // JSON: applicationNo/publicationNo/sectionType/claimNo/pageStart
+    kbId?: number;
+    domainCode?: string;
+    sectionType?: string;
+    sectionTitle?: string;
+    claimNo?: string;
+    pageStart?: number;
+    pageEnd?: number;
+    applicationNo?: string;
+    publicationNo?: string;
     content?: string; // 引用原文
+    score?: number; // 归一化置信度(0~1)
   }
 
   /** 发送消息响应 */
@@ -53,17 +65,46 @@ export namespace AiChatApi {
     domainCode?: string | null; // 实际使用的领域
     route?: string | null; // 路由结果(后端未提供时为空)
     intent?: string | null; // 本轮识别意图
-    degraded?: boolean | null; // 是否降级
+    degraded?: boolean | null; // 是否降级(超时/验证降级)
     answer?: null | string; // AI 回答内容(answerable=true 时有值)
     answerable?: boolean; // 是否可作答
     confidence?: null | number; // 证据充分度融合置信度(0~1)
     citations?: null | number[]; // 引用证据 chunkId 列表
-    evidence?: null | EvidenceSummary[]; // 证据摘要(专利来源卡片)
-    traceId?: null | string; // 证据评估链路追踪号(ev- 前缀)
+    evidence?: null | EvidenceSummary[]; // 证据列表(统一 Evidence DTO)
+    traceId?: null | string; // 链路追踪号(q- 前缀)
     latencyMs?: null | number; // 本次请求整体耗时(ms)
     transferRequired?: boolean; // 是否需转人工
     transferReason?: null | string; // 转人工原因(transferRequired=true 时填充)
     summary?: null | string; // 会话摘要(转人工时填充, 已落库 SYSTEM 消息)
+  }
+
+  /** Query Trace 阶段(查看执行链路) */
+  export interface TraceStage {
+    seq?: number;
+    stage?: string;
+    status?: string;
+    elapsedMs?: number;
+    skipped?: boolean;
+    errorCode?: string;
+    errorMessage?: string;
+    modelCallId?: string;
+    inputSummary?: string;
+    outputSummary?: string;
+  }
+
+  /** Query Trace 主记录 + 阶段 */
+  export interface QueryTrace {
+    traceId?: string;
+    query?: string;
+    route?: string;
+    kbId?: number;
+    domainCode?: string;
+    conversationId?: number;
+    totalMs?: number;
+    status?: string;
+    startedAt?: number | string;
+    finishedAt?: number | string;
+    stages?: TraceStage[];
   }
 }
 
@@ -79,6 +120,13 @@ export function sendChatMessage(data: {
     // LLM 检索+回答链路实测 10~60s, 默认 30s 会超时
     timeout: 180_000,
   });
+}
+
+/** 查看本次执行链路(Query Trace; P0-09, 无需用户复制 traceId) */
+export function getQueryTrace(traceId: string) {
+  return requestClient.get<AiChatApi.QueryTrace>(
+    `/chat/ops/query-trace?traceId=${encodeURIComponent(traceId)}`,
+  );
 }
 
 /** 转人工(返回会话摘要) */
