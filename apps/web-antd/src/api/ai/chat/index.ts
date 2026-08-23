@@ -32,7 +32,7 @@ export namespace AiChatApi {
     intent?: string; // 意图(USER 消息识别结果)
     confidence?: number; // 置信度 0~1(AI 消息)
     traceId?: string; // 证据链路追踪号(AI 消息)
-    evidenceList?: EvidenceSummary[]; // 证据摘要(专利来源卡片)
+    evidence?: EvidenceSummary[]; // 证据摘要(专利来源卡片)
     createTime?: number | string;
   }
 
@@ -54,12 +54,13 @@ export namespace AiChatApi {
     route?: string | null; // 路由结果(后端未提供时为空)
     intent?: string | null; // 本轮识别意图
     degraded?: boolean | null; // 是否降级
-    reply?: null | string; // AI 回复内容(answerable=true 时有值)
+    answer?: null | string; // AI 回答内容(answerable=true 时有值)
     answerable?: boolean; // 是否可作答
     confidence?: null | number; // 证据充分度融合置信度(0~1)
     citations?: null | number[]; // 引用证据 chunkId 列表
-    evidenceList?: null | EvidenceSummary[]; // 证据摘要(专利来源卡片)
+    evidence?: null | EvidenceSummary[]; // 证据摘要(专利来源卡片)
     traceId?: null | string; // 证据评估链路追踪号(ev- 前缀)
+    latencyMs?: null | number; // 本次请求整体耗时(ms)
     transferRequired?: boolean; // 是否需转人工
     transferReason?: null | string; // 转人工原因(transferRequired=true 时填充)
     summary?: null | string; // 会话摘要(转人工时填充, 已落库 SYSTEM 消息)

@@ -345,7 +345,7 @@ async function send() {
     };
 
     const reply =
-      resp.reply ||
+      resp.answer ||
       resp.transferReason ||
       '当前证据不足，暂时无法基于知识库给出可靠回答。';
     messages.value.push({
@@ -353,7 +353,7 @@ async function send() {
       role: 'AI',
       content: reply,
       citations: (resp.citations || []).map(String),
-      evidenceList: resp.evidenceList || undefined,
+      evidence: resp.evidence || undefined,
       confidence: resp.confidence ?? undefined,
       traceId: resp.traceId ?? undefined,
       createTime: Date.now(),
@@ -519,12 +519,12 @@ onMounted(async () => {
                       </div>
 
                       <div
-                        v-if="msg.evidenceList?.length"
+                        v-if="msg.evidence?.length"
                         class="wb-ev-cards"
                       >
                         <div class="wb-ev-heading">引用来源</div>
                         <div
-                          v-for="(ev, index) in msg.evidenceList"
+                          v-for="(ev, index) in msg.evidence"
                           :key="ev.chunkId || index"
                           class="wb-ev-card"
                         >
