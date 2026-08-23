@@ -15,7 +15,7 @@ import {
   getDocument,
   getDocumentPage,
 } from '#/api/ai/knowledge';
-import { retryExtractByDocId } from '#/api/ai/review';
+import { retryOpsIngest } from '#/api/ai/ops';
 import { uploadFile } from '#/api/infra/file';
 
 import ChunkModal from './chunk-modal.vue';
@@ -66,7 +66,6 @@ async function handleUploadFile(file: File) {
       type: getDocType(file.name),
       storagePath: url,
       fileHash,
-      // 业务页面不让用户选择 Chunk 算法；由领域适配器/平台默认策略决定。
       chunkStrategy: 'auto',
     });
     message.success({ content: `「${file.name}」上传成功，系统已开始自动处理`, key: 'upload' });
@@ -118,7 +117,7 @@ function buildActions(row: KnowledgeDocument): ActionItem[] {
     actions.push({ label: '去审核', type: 'link', icon: ACTION_ICON.AUDIT, onClick: () => goReview(row) });
   }
   if (row.parseStatus === 'FAILED') {
-    actions.push({ label: '重试处理', type: 'link', icon: ACTION_ICON.REFRESH, onClick: () => handleRetryExtract(row) });
+    actions.push({ label: '重新处理', type: 'link', icon: ACTION_ICON.REFRESH, onClick: () => handleRetry(row) });
   }
   actions.push({ label: '处理链路', type: 'link', icon: ACTION_ICON.VIEW, onClick: () => viewTrace(row) });
   if (row.parseStatus === 'INDEXED' || row.parseStatus === 'PUBLISHED') {
@@ -131,13 +130,15 @@ function buildActions(row: KnowledgeDocument): ActionItem[] {
   return actions;
 }
 
-async function handleRetryExtract(row: KnowledgeDocument) {
+async function handleRetry(row: KnowledgeDocument) {
+  if (!row.id) return;
   try {
-    await retryExtractByDocId(row.id!);
-    message.success('已重新发起处理');
+    await retryOpsIngest(row.id);
+    message.success('已重新执行完整处理流程，可在“处理链路”查看进度');
     handleRefresh();
+    pollRowStatus(row.id);
   } catch {
-    message.error('重试失败，请从处理链路查看原因');
+    message.error('重新处理失败，请从处理链路查看原因');
   }
 }
 
@@ -156,6 +157,7 @@ function pollRowStatus(docId: number) {
         parseStatus: doc.parseStatus,
         chunkCount: doc.chunkCount,
         errorMsg: doc.errorMsg,
+        versionId: doc.versionId,
         versionNo: doc.versionNo,
         versionStatus: doc.versionStatus,
       });
