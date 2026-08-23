@@ -167,7 +167,7 @@ async function loadKnowledgeBases() {
   try {
     const page = await getKnowledgeBasePage({ pageNo: 1, pageSize: 200 });
     kbOptions.value = (page.list || [])
-      .filter((kb) => kb.id != null && kb.status !== 0)
+      .filter((kb) => kb.id != null && kb.status !== 1) // status: 0=启用 1=禁用, 过滤禁用
       .map((kb) => ({
         label: `${kb.name}${kb.domainCode === 'PATENT' ? ' · 专利' : ''}`,
         value: kb.id!,
