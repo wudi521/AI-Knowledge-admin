@@ -9,7 +9,6 @@ import {
   createKnowledgeBase,
   updateKnowledgeBase,
 } from '#/api/ai/knowledge';
-import { getModelListByType } from '#/api/ai/model';
 
 import { useFormSchema } from '../data';
 
@@ -39,7 +38,6 @@ const [Modal, modalApi] = useVbenModal({
     modalApi.lock();
     try {
       const data = await formApi.getValues();
-      // 可见角色: 数组 join 为逗号分隔字符串(后端 varchar 存储)
       if (Array.isArray(data.visibleRoles)) {
         data.visibleRoles = data.visibleRoles.join(',');
       }
@@ -56,25 +54,27 @@ const [Modal, modalApi] = useVbenModal({
     }
   },
   async onOpened() {
-    // 动态加载已配置且启用的 Embedding 模型
-    try {
-      const models = await getModelListByType('embedding');
-      formApi.updateSchema([
-        {
-          fieldName: 'embedModel',
-          componentProps: {
-            options: models.map((m) => ({
-              label: `${m.name} (${m.modelName})`,
-              value: m.modelName,
-            })),
-          },
-        },
-      ]);
-    } catch {
-      // 模型网关未启动时忽略, 保留静态选项
-    }
     const row = modalApi.getData<Record<string, any>>();
-    // 可见角色: 后端存逗号分隔字符串, 表单用数组(多选) -> 回显时拆分
+
+    // 领域决定解析、切分、审核和检索策略。知识库创建后不允许在编辑表单里切换领域，
+    // 避免已有文档继续沿用旧领域产物形成混合状态；需要换领域时应新建知识库重新入库。
+    formApi.updateSchema([
+      {
+        fieldName: 'domainCode',
+        componentProps: {
+          disabled: !!row?.id,
+          placeholder: row?.id ? '知识库创建后领域不可修改' : '请选择知识领域',
+          options: [
+            { label: '通用知识库', value: 'GENERAL' },
+            { label: '专利知识库', value: 'PATENT' },
+          ],
+        },
+        help: row?.id
+          ? '领域决定文档解析、切分、审核和检索策略。已有知识库如需切换领域，请新建目标领域知识库并重新入库。'
+          : '选择后将自动套用对应领域的解析、检索和回答策略。',
+      },
+    ]);
+
     if (row && typeof row.visibleRoles === 'string' && row.visibleRoles) {
       row.visibleRoles = row.visibleRoles
         .split(',')
