@@ -2,84 +2,43 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { KnowledgeApi } from '#/api/ai/knowledge';
 
-import {
-  Page,
-  useVbenModal,
-  confirm,
-} from '@vben/common-ui';
-
+import { Page, confirm, useVbenModal } from '@vben/common-ui';
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
-
 import { useRouter } from 'vue-router';
-
 import { Tag, message } from 'ant-design-vue';
-
 import { deleteKnowledgeBase, getKnowledgeBasePage } from '#/api/ai/knowledge';
-
-const router = useRouter();
 
 import { useGridColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
-import EvalManage from './knowledge/modules/eval-manage.vue';
-import IntentManage from './knowledge/modules/intent-manage.vue';
-import SlotManage from './knowledge/modules/slot-manage.vue';
+
+const router = useRouter();
 
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: Form,
   destroyOnClose: true,
 });
 
-/** 刷新表格 */
 function handleRefresh() {
   gridApi.query();
 }
 
-/** 评测管理弹窗 */
-const [EvalManageModal, evalManageModalApi] = useVbenModal({
-  connectedComponent: EvalManage,
-  destroyOnClose: true,
-});
-
-/** 打开评测管理 */
-function handleEvalManage(row: KnowledgeApi.KnowledgeBase) {
-  evalManageModalApi.setData(row).open();
-}
-
-/** 意图管理弹窗 */
-const [IntentManageModal, intentManageModalApi] = useVbenModal({
-  connectedComponent: IntentManage,
-  destroyOnClose: true,
-});
-
-/** 打开意图管理 */
-function handleIntentManage(row: KnowledgeApi.KnowledgeBase) {
-  intentManageModalApi.setData(row).open();
-}
-
-/** 槽位管理弹窗 */
-const [SlotManageModal, slotManageModalApi] = useVbenModal({
-  connectedComponent: SlotManage,
-  destroyOnClose: true,
-});
-
-/** 打开槽位管理 */
-function handleSlotManage(row: KnowledgeApi.KnowledgeBase) {
-  slotManageModalApi.setData(row).open();
-}
-
-/** 新增知识库 */
 function handleAdd() {
   formModalApi.setData(null).open();
 }
 
-/** 编辑知识库 */
 function handleEdit(row: KnowledgeApi.KnowledgeBase) {
   formModalApi.setData(row).open();
 }
 
-/** 删除知识库 */
+function enterWorkspace(row: KnowledgeApi.KnowledgeBase) {
+  router.push({
+    path: '/kb/workspace',
+    query: { kbId: row.id },
+  });
+}
+
 async function handleDelete(row: KnowledgeApi.KnowledgeBase) {
-  await confirm(`确认删除知识库「${row.name}」吗？`);
+  await confirm(`确认删除知识库「${row.name}」吗？知识库内仍有资料时请先完成资料处置。`);
   try {
     await deleteKnowledgeBase(row.id!);
     message.success('删除成功');
@@ -121,17 +80,18 @@ const [Grid, gridApi] = useVbenVxeGrid({
 </script>
 
 <template>
-  <Page auto-content-height>
+  <Page
+    auto-content-height
+    title="知识库"
+    description="知识库是资料、审核、问答与质量管理的业务工作空间。进入知识库后再处理具体业务，避免在列表页堆叠技术操作。"
+  >
     <FormModal @success="handleRefresh" />
-    <EvalManageModal />
-    <IntentManageModal />
-    <SlotManageModal />
-    <Grid table-title="知识库列表">
+    <Grid table-title="知识库">
       <template #toolbar-tools>
         <TableAction
           :actions="[
             {
-              label: '新增知识库',
+              label: '新建知识库',
               type: 'primary',
               icon: ACTION_ICON.ADD,
               onClick: handleAdd,
@@ -145,56 +105,27 @@ const [Grid, gridApi] = useVbenVxeGrid({
       </template>
       <template #status="{ row }">
         <Tag :color="row.status === 1 ? 'success' : 'default'">
-          {{ row.status === 1 ? '启用' : '禁用' }}
+          {{ row.status === 1 ? '启用' : '停用' }}
         </Tag>
       </template>
       <template #operation="{ row }">
         <TableAction
           :actions="[
             {
-              label: '编辑',
+              label: '进入知识库',
+              type: 'primary',
+              icon: 'lucide:arrow-right-circle',
+              onClick: () => enterWorkspace(row),
+            },
+            {
+              label: '设置',
               icon: ACTION_ICON.EDIT,
               onClick: () => handleEdit(row),
             },
             {
-              label: '进入空间',
-              icon: 'lucide:layout-dashboard',
-              onClick: () =>
-                router.push({
-                  path: '/kb/workspace',
-                  query: { kbId: row.id },
-                }),
-            },
-            {
-              label: '检索测试',
-              icon: ACTION_ICON.SEARCH,
-              onClick: () =>
-                router.push({
-                  path: '/ai/retrieval',
-                  query: { kbId: row.id },
-                }),
-            },
-            {
-              label: '意图管理',
-              icon: 'lucide:settings',
-              auth: ['knowledge:intent:query'],
-              onClick: () => handleIntentManage(row),
-            },
-            {
-              label: '槽位管理',
-              icon: 'lucide:list-checks',
-              auth: ['knowledge:kb-slot:query'],
-              onClick: () => handleSlotManage(row),
-            },
-            {
-              label: '评测',
-              icon: 'lucide:clipboard-check',
-              auth: ['eval:task:run'],
-              onClick: () => handleEvalManage(row),
-            },
-            {
               label: '删除',
               icon: ACTION_ICON.DELETE,
+              danger: true,
               onClick: () => handleDelete(row),
             },
           ]"
