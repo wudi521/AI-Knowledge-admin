@@ -40,7 +40,7 @@ export function deleteKnowledgeBase(id: number) {
   return requestClient.delete(`/knowledge/knowledge-base/delete?id=${id}`);
 }
 
-/* ========== 文档(入库管线) ========== */
+/* ========== 文档 ========== */
 export interface KnowledgeDocument {
   id?: number;
   kbId?: number;
@@ -50,20 +50,25 @@ export interface KnowledgeDocument {
   storagePath?: string;
   fileHash?: string;
   parseStatus?: string;
-  chunkStrategy?: string; // 切分策略(文档级: auto/structure/parent-child/semantic/policy/faq/table/image)
-  chunkStrategyParams?: string; // 切分策略参数(JSON)
+  chunkStrategy?: string; // 后端技术字段，业务页面默认不展示
+  chunkStrategyParams?: string;
   domainMetadata?: string; // 领域文档元数据(JSON; 专利著录信息)
-  chunkCount?: number; // 片段数(解析结果)
-  errorMsg?: string; // 失败原因
-  versionNo?: string; // 当前版本号(联表)
-  versionStatus?: string; // 当前版本状态(联表)
+  chunkCount?: number;
+  errorMsg?: string;
+  versionId?: number; // 当前版本 id；审核发布等上下文操作使用
+  versionNo?: string;
+  versionStatus?: string;
   owner?: string;
   createTime?: string;
 }
 
 /** 查询文档分页 */
 export function getDocumentPage(
-  params: PageParam & { kbId?: number; name?: string },
+  params: PageParam & {
+    kbId?: number;
+    name?: string;
+    parseStatus?: string;
+  },
 ) {
   return requestClient.get<PageResult<KnowledgeDocument>>(
     '/knowledge/document/page',
@@ -76,7 +81,7 @@ export function createDocument(data: Partial<KnowledgeDocument>) {
   return requestClient.post<number>('/knowledge/document/create', data);
 }
 
-/** 获得文档详情(单行状态轮询用) */
+/** 获得文档详情 */
 export function getDocument(id: number) {
   return requestClient.get<KnowledgeDocument>(`/knowledge/document/get?id=${id}`);
 }
