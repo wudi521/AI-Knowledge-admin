@@ -1,7 +1,7 @@
 import { requestClient } from '#/api/request';
 
 /**
- * 知识运营中心(Knowledge Ops) API
+ * 运行观测 API
  */
 export namespace OpsApi {
   /** 任务(分页行) */
@@ -90,4 +90,11 @@ export function getOpsJobs(params: { status?: string; stage?: string; pageNo: nu
 /** 任务详情(阶段时间轴) */
 export function getOpsJobDetail(jobId: number) {
   return requestClient.get<OpsApi.JobTrace>('/ingestion/ops/job-detail', { params: { jobId } });
+}
+
+/** 失败文档重新执行完整入库流程(解析/切分/向量化/后续审核)。 */
+export function retryOpsIngest(documentId: number) {
+  return requestClient.post<boolean>('/ingestion/ops/retry-ingest', undefined, {
+    params: { documentId },
+  });
 }
