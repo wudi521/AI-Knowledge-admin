@@ -74,8 +74,6 @@ export function sendChatMessage(data: {
   customerId?: string;
   message: string;
   kbId?: number;
-  /** @deprecated 仅兼容旧调用方，前端工作台不得发送。 */
-  kbIds?: number[];
 }) {
   return requestClient.post<AiChatApi.SendResp>('/chat/chat/send', data, {
     // LLM 检索+回答链路实测 10~60s, 默认 30s 会超时
@@ -104,7 +102,7 @@ export function getChatHistory(conversationId: number) {
   }>(`/chat/conversation/history?conversationId=${conversationId}`);
 }
 
-/** 会话分页列表 */
+/** 会话分页列表(全租户, 供管理端) */
 export function getChatConversations(params: {
   pageNo: number;
   pageSize: number;
@@ -112,6 +110,18 @@ export function getChatConversations(params: {
 }) {
   return requestClient.get<{ list: AiChatApi.Conversation[]; total: number }>(
     '/chat/conversation/page',
+    { params },
+  );
+}
+
+/** 当前用户的会话分页(用户范围隔离, 工作台使用) */
+export function getMyChatConversations(params: {
+  pageNo: number;
+  pageSize: number;
+  status?: string;
+}) {
+  return requestClient.get<{ list: AiChatApi.Conversation[]; total: number }>(
+    '/chat/conversation/my-page',
     { params },
   );
 }

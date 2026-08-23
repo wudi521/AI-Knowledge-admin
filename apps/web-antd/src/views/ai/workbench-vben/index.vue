@@ -20,8 +20,8 @@ import {
 } from 'ant-design-vue';
 
 import {
-  getChatConversations,
   getChatHistory,
+  getMyChatConversations,
   sendChatMessage,
 } from '#/api/ai/chat';
 import { getKnowledgeBasePage } from '#/api/ai/knowledge';
@@ -194,7 +194,7 @@ async function loadConversations(isCurrent?: () => boolean) {
   const requestId = ++conversationListRequestSequence;
   loadingConversations.value = true;
   try {
-    const page = await getChatConversations({ pageNo: 1, pageSize: 50 });
+    const page = await getMyChatConversations({ pageNo: 1, pageSize: 50 });
     if (
       requestId === conversationListRequestSequence &&
       (!isCurrent || isCurrent())
@@ -237,6 +237,7 @@ async function selectConversation(item: AiChatApi.Conversation) {
     if (index >= 0) conversations.value[index] = conversation;
     activeConversation.value = conversation;
     currentConversationId.value = conversation.id;
+    syncConversationUrl(conversation.id);
     selectedKbId.value = conversation.kbId ?? undefined;
     lastResult.value = undefined;
     messages.value = data.messages || [];
@@ -265,6 +266,18 @@ function clearCurrentConversation() {
   activeConversation.value = undefined;
   messages.value = [];
   lastResult.value = undefined;
+  syncConversationUrl(undefined);
+}
+
+/** 把当前会话写入 URL query(RF-04: 刷新后可从 conversationId 恢复) */
+function syncConversationUrl(conversationId?: number) {
+  const query = { ...route.query };
+  if (conversationId != null) {
+    query.conversationId = String(conversationId);
+  } else {
+    delete query.conversationId;
+  }
+  router.replace({ query });
 }
 
 function handleKbChange(nextKbId: number | undefined) {
@@ -332,6 +345,7 @@ async function send() {
     }
     lastResult.value = resp;
     currentConversationId.value = resp.conversationId;
+    syncConversationUrl(resp.conversationId);
     selectedKbId.value = resp.kbId ?? selectedKbId.value;
     activeConversation.value = {
       ...(previousConversation || {}),
@@ -382,6 +396,12 @@ function openTrace(traceId?: string | null) {
 
 onMounted(async () => {
   await Promise.all([loadKnowledgeBases(), loadConversations()]);
+  // RF-04: 刷新/深链从 URL conversationId 自动恢复会话(kbId/domain/消息)
+  const deepLinkId = Number(route.query.conversationId || 0);
+  if (Number.isFinite(deepLinkId) && deepLinkId > 0) {
+    const target = conversations.value.find((c) => c.id === deepLinkId);
+    await selectConversation(target ?? ({ id: deepLinkId } as AiChatApi.Conversation));
+  }
 });
 </script>
 
