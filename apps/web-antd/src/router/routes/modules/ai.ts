@@ -96,12 +96,12 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'workbench',
-        component: () => import('#/views/ai/workbench/index.vue'),
+        component: () => import('#/views/ai/workbench-vben/index.vue'),
         name: 'AiWorkbench',
         meta: {
           noCache: true,
           canTo: true,
-          title: '对话工作台(样板)',
+          title: '知识问答工作台',
           activePath: '/ai/workbench',
         },
       },
