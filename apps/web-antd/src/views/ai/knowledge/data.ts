@@ -3,19 +3,7 @@ import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 
 import { requestClient } from '#/api/request';
 
-/** 切分策略 → 中文 */
-export const CHUNK_STRATEGY_TEXT: Record<string, string> = {
-  auto: '自动选择',
-  structure: '结构切分',
-  'parent-child': '父子切分',
-  semantic: '语义切分',
-  policy: '条款切分',
-  faq: '问答切分',
-  table: '表格切分',
-  image: '图片切分',
-};
-
-/** 新增/编辑 表单 */
+/** 新增/编辑知识库。领域决定后续解析、检索与回答策略，技术参数由平台默认策略托管。 */
 export function useFormSchema(): VbenFormSchema[] {
   return [
     {
@@ -25,38 +13,27 @@ export function useFormSchema(): VbenFormSchema[] {
     },
     {
       fieldName: 'name',
-      label: '名称',
+      label: '知识库名称',
       component: 'Input',
       componentProps: {
-        placeholder: '请输入知识库名称',
+        placeholder: '例如：专利技术资料库',
         clearable: true,
       },
       rules: 'required',
     },
     {
       fieldName: 'domainCode',
-      label: '领域',
+      label: '知识领域',
       component: 'Select',
       componentProps: {
         placeholder: '请选择知识领域',
         options: [
-          { label: '通用 (GENERAL)', value: 'GENERAL' },
-          { label: '专利 (PATENT)', value: 'PATENT' },
+          { label: '通用知识库', value: 'GENERAL' },
+          { label: '专利知识库', value: 'PATENT' },
         ],
       },
       defaultValue: 'GENERAL',
-    },
-    {
-      fieldName: 'status',
-      label: '状态',
-      component: 'Select',
-      componentProps: {
-        options: [
-          { label: '启用', value: 1 },
-          { label: '禁用', value: 0 },
-        ],
-      },
-      defaultValue: 1,
+      rules: 'required',
     },
     {
       fieldName: 'visibleRoles',
@@ -68,66 +45,70 @@ export function useFormSchema(): VbenFormSchema[] {
         api: () => requestClient.get('/system/role/list-all-simple'),
         labelField: 'name',
         valueField: 'code',
-        placeholder: '选择可见角色(空=全部可见)',
+        placeholder: '不选择表示全部角色可见',
         allowClear: true,
       },
-      // 前端为数组, 提交前在 form.vue join 为逗号分隔字符串; 回显时 split
     },
     {
       fieldName: 'effectiveTo',
       label: '有效期至',
       component: 'DatePicker',
       componentProps: {
-        placeholder: '选择有效期(空=永久有效)',
+        placeholder: '不设置表示长期有效',
         valueFormat: 'YYYY-MM-DD HH:mm:ss',
         showTime: true,
       },
     },
     {
+      fieldName: 'status',
+      label: '状态',
+      component: 'Select',
+      componentProps: {
+        options: [
+          { label: '启用', value: 1 },
+          { label: '停用', value: 0 },
+        ],
+      },
+      defaultValue: 1,
+    },
+    {
       fieldName: 'remark',
-      label: '备注',
+      label: '说明',
       component: 'Textarea',
       componentProps: {
-        placeholder: '请输入备注',
+        placeholder: '描述知识库用途、资料范围或使用约束',
         rows: 3,
       },
     },
   ];
 }
 
-/** 列表搜索表单 */
 export function useGridFormSchema(): VbenFormSchema[] {
   return [
     {
       fieldName: 'name',
-      label: '名称',
+      label: '知识库名称',
       component: 'Input',
       componentProps: {
-        placeholder: '请输入知识库名称',
+        placeholder: '搜索知识库',
         clearable: true,
       },
     },
   ];
 }
 
-/** 列表列 */
 export function useGridColumns(): VxeTableGridOptions['columns'] {
   return [
     {
-      field: 'id',
-      title: '编号',
-      width: 80,
-    },
-    {
       field: 'name',
-      title: '名称',
-      minWidth: 160,
+      title: '知识库',
+      minWidth: 190,
       showOverflow: true,
     },
     {
       field: 'domainCode',
       title: '领域',
-      width: 90,
+      width: 100,
       slots: { default: 'domainCode' },
     },
     {
@@ -138,8 +119,8 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
     },
     {
       field: 'remark',
-      title: '备注',
-      minWidth: 160,
+      title: '说明',
+      minWidth: 220,
       showOverflow: true,
     },
     {
@@ -163,7 +144,7 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
     {
       field: 'operation',
       title: '操作',
-      width: 520,
+      width: 260,
       slots: { default: 'operation' },
       fixed: 'right',
     },
