@@ -33,6 +33,7 @@ defineOptions({ name: 'KnowledgeQaWorkbench' });
 
 const conversations = ref<AiChatApi.Conversation[]>([]);
 const currentConversationId = ref<number>();
+const activeConversation = ref<AiChatApi.Conversation>();
 const messages = ref<AiChatApi.Message[]>([]);
 const draft = ref('');
 const sending = ref(false);
@@ -48,17 +49,79 @@ const chatBox = ref<HTMLElement>();
 const inputRef = ref<{ focus?: () => void }>();
 
 let localSequence = 0;
+let historyRequestSequence = 0;
+let conversationListRequestSequence = 0;
+let sendRequestSequence = 0;
+let workspaceVersion = 0;
+
 function localId() {
   localSequence += 1;
   return -localSequence;
+}
+
+function invalidateWorkspace() {
+  workspaceVersion += 1;
+  historyRequestSequence += 1;
+  sendRequestSequence += 1;
+  loadingHistory.value = false;
+  sending.value = false;
+}
+
+function invalidatePendingSend() {
+  workspaceVersion += 1;
+  sendRequestSequence += 1;
+  sending.value = false;
 }
 
 const selectedKb = computed(() =>
   kbOptions.value.find((kb) => kb.value === selectedKbId.value),
 );
 const currentConversation = computed(() =>
-  conversations.value.find((c) => c.id === currentConversationId.value),
+  activeConversation.value?.id === currentConversationId.value
+    ? activeConversation.value
+    : conversations.value.find((c) => c.id === currentConversationId.value),
 );
+const currentKnowledgeContext = computed(() => {
+  if (currentConversation.value) {
+    return formatKnowledgeContext(
+      currentConversation.value.kbId,
+      currentConversation.value.domainCode,
+    );
+  }
+  if (selectedKbId.value != null) {
+    return formatKnowledgeContext(selectedKbId.value, selectedKb.value?.domainCode);
+  }
+  return '';
+});
+const currentDomainCode = computed(
+  () => currentConversation.value?.domainCode ?? selectedKb.value?.domainCode,
+);
+const pageHeadContext = computed(() => {
+  if (currentConversation.value) {
+    return currentKnowledgeContext.value;
+  }
+  if (selectedKbId.value == null) {
+    return '';
+  }
+  return currentDomainCode.value === 'PATENT'
+    ? '专利知识问答'
+    : '通用知识问答';
+});
+
+function formatKnowledgeContext(
+  kbId?: number | null,
+  domainCode?: string | null,
+): string {
+  const kbLabel =
+    kbId != null
+      ? kbOptions.value.find((kb) => kb.value === kbId)?.label || `知识库 #${kbId}`
+      : '未绑定知识库';
+  return domainCode ? `${kbLabel} · ${domainCode}` : kbLabel;
+}
+
+function conversationContextLabel(item: AiChatApi.Conversation): string {
+  return formatKnowledgeContext(item.kbId, item.domainCode);
+}
 
 function formatTime(value?: number | string): string {
   if (value == null || value === '') return '';
@@ -114,7 +177,12 @@ async function loadKnowledgeBases() {
       }));
 
     const routeKbId = Number(route.query.kbId || 0);
-    if (routeKbId && kbOptions.value.some((kb) => kb.value === routeKbId)) {
+    if (
+      !currentConversationId.value &&
+      selectedKbId.value == null &&
+      Number.isFinite(routeKbId) &&
+      kbOptions.value.some((kb) => kb.value === routeKbId)
+    ) {
       selectedKbId.value = routeKbId;
     }
   } finally {
@@ -122,50 +190,118 @@ async function loadKnowledgeBases() {
   }
 }
 
-async function loadConversations() {
+async function loadConversations(isCurrent?: () => boolean) {
+  const requestId = ++conversationListRequestSequence;
   loadingConversations.value = true;
   try {
     const page = await getChatConversations({ pageNo: 1, pageSize: 50 });
-    conversations.value = page.list || [];
+    if (
+      requestId === conversationListRequestSequence &&
+      (!isCurrent || isCurrent())
+    ) {
+      conversations.value = page.list || [];
+    }
   } catch {
-    message.error('会话列表加载失败');
+    if (
+      requestId === conversationListRequestSequence &&
+      (!isCurrent || isCurrent())
+    ) {
+      message.error('会话列表加载失败');
+    }
   } finally {
-    loadingConversations.value = false;
+    if (requestId === conversationListRequestSequence) {
+      loadingConversations.value = false;
+    }
   }
 }
 
 async function selectConversation(item: AiChatApi.Conversation) {
-  currentConversationId.value = item.id;
-  lastResult.value = undefined;
+  invalidateWorkspace();
+  const requestId = ++historyRequestSequence;
+  const requestVersion = workspaceVersion;
   loadingHistory.value = true;
   try {
     const data = await getChatHistory(item.id);
+    if (
+      requestId !== historyRequestSequence ||
+      requestVersion !== workspaceVersion
+    ) {
+      return;
+    }
+    const conversation = {
+      ...item,
+      ...(data.conversation || {}),
+      id: data.conversation?.id ?? item.id,
+    };
+    const index = conversations.value.findIndex((c) => c.id === item.id);
+    if (index >= 0) conversations.value[index] = conversation;
+    activeConversation.value = conversation;
+    currentConversationId.value = conversation.id;
+    selectedKbId.value = conversation.kbId ?? undefined;
+    lastResult.value = undefined;
     messages.value = data.messages || [];
     scrollBottom();
     nextTick(() => inputRef.value?.focus?.());
   } catch {
-    message.error('会话记录加载失败');
+    if (
+      requestId === historyRequestSequence &&
+      requestVersion === workspaceVersion
+    ) {
+      message.error('会话记录加载失败');
+    }
   } finally {
-    loadingHistory.value = false;
+    if (
+      requestId === historyRequestSequence &&
+      requestVersion === workspaceVersion
+    ) {
+      loadingHistory.value = false;
+    }
+  }
+}
+
+function clearCurrentConversation() {
+  invalidateWorkspace();
+  currentConversationId.value = undefined;
+  activeConversation.value = undefined;
+  messages.value = [];
+  lastResult.value = undefined;
+}
+
+function handleKbChange(nextKbId: number | undefined) {
+  const normalizedKbId =
+    nextKbId != null && Number.isFinite(nextKbId) ? nextKbId : undefined;
+  const conversationKbId = currentConversation.value?.kbId;
+  const hasCurrentConversation = currentConversationId.value != null;
+  const kbChanged = selectedKbId.value !== normalizedKbId;
+  if (kbChanged && loadingHistory.value) {
+    invalidateWorkspace();
+  } else if (kbChanged && (!hasCurrentConversation || conversationKbId === normalizedKbId)) {
+    invalidatePendingSend();
+  }
+  selectedKbId.value = normalizedKbId;
+  if (hasCurrentConversation && conversationKbId !== normalizedKbId) {
+    clearCurrentConversation();
   }
 }
 
 function newConversation() {
-  currentConversationId.value = undefined;
-  messages.value = [];
-  lastResult.value = undefined;
+  clearCurrentConversation();
   draft.value = '';
   nextTick(() => inputRef.value?.focus?.());
 }
 
 async function send() {
   const text = draft.value.trim();
-  if (!text || sending.value) return;
-  if (!selectedKbId.value) {
+  if (!text || sending.value || loadingHistory.value) return;
+  if (!currentConversationId.value && !selectedKbId.value) {
     message.warning('请先选择要查询的知识库');
     return;
   }
 
+  const existingConversationId = currentConversationId.value;
+  const previousConversation = activeConversation.value;
+  const requestId = ++sendRequestSequence;
+  const requestVersion = workspaceVersion;
   sending.value = true;
   messages.value.push({
     id: localId(),
@@ -177,21 +313,43 @@ async function send() {
   scrollBottom();
 
   try {
-    const resp = await sendChatMessage({
-      conversationId: currentConversationId.value,
-      message: text,
-      channel: 'WEB',
-      kbIds: [selectedKbId.value],
-    });
+    const resp = existingConversationId
+      ? await sendChatMessage({
+          conversationId: existingConversationId,
+          message: text,
+          channel: 'WEB',
+        })
+      : await sendChatMessage({
+          kbId: selectedKbId.value!,
+          message: text,
+          channel: 'WEB',
+        });
+    if (
+      requestId !== sendRequestSequence ||
+      requestVersion !== workspaceVersion
+    ) {
+      return;
+    }
     lastResult.value = resp;
     currentConversationId.value = resp.conversationId;
+    selectedKbId.value = resp.kbId ?? selectedKbId.value;
+    activeConversation.value = {
+      ...(previousConversation || {}),
+      id: resp.conversationId,
+      status: previousConversation?.status || 'ACTIVE',
+      kbId: resp.kbId ?? previousConversation?.kbId ?? selectedKbId.value,
+      domainCode:
+        resp.domainCode ??
+        previousConversation?.domainCode ??
+        selectedKb.value?.domainCode,
+    };
 
     const reply =
       resp.reply ||
       resp.transferReason ||
       '当前证据不足，暂时无法基于知识库给出可靠回答。';
     messages.value.push({
-      id: localId(),
+      id: resp.messageId ?? localId(),
       role: 'AI',
       content: reply,
       citations: (resp.citations || []).map(String),
@@ -200,13 +358,20 @@ async function send() {
       traceId: resp.traceId ?? undefined,
       createTime: Date.now(),
     });
-    await loadConversations();
+    await loadConversations(() =>
+      requestId === sendRequestSequence && requestVersion === workspaceVersion,
+    );
     scrollBottom();
   } catch {
     // 全局请求拦截器负责提示；保留用户问题方便重试。
   } finally {
-    sending.value = false;
-    nextTick(() => inputRef.value?.focus?.());
+    if (
+      requestId === sendRequestSequence &&
+      requestVersion === workspaceVersion
+    ) {
+      sending.value = false;
+      nextTick(() => inputRef.value?.focus?.());
+    }
   }
 }
 
@@ -230,25 +395,30 @@ onMounted(async () => {
       <div class="wb-page-head">
         <div class="wb-page-head-main">
           <Select
-            v-model:value="selectedKbId"
+            :value="selectedKbId"
             :options="kbOptions"
             :loading="kbLoading"
             placeholder="选择知识库"
             class="wb-kb-select"
             show-search
             option-filter-prop="label"
+            @update:value="
+              (value) => handleKbChange(typeof value === 'number' ? value : undefined)
+            "
           />
-          <Tag v-if="selectedKb?.domainCode === 'PATENT'" color="blue">
-            专利知识问答
+          <Tag
+            v-if="pageHeadContext"
+            :color="currentDomainCode === 'PATENT' ? 'blue' : 'default'"
+          >
+            {{ pageHeadContext }}
           </Tag>
-          <Tag v-else-if="selectedKbId" color="default">通用知识问答</Tag>
           <span class="wb-page-desc">模型由 AI 运行时自动路由</span>
         </div>
         <Button type="primary" @click="newConversation">＋ 新建会话</Button>
       </div>
 
       <Alert
-        v-if="!selectedKbId"
+        v-if="!selectedKbId && !currentConversationId"
         class="mb-4"
         type="info"
         show-icon
@@ -281,6 +451,9 @@ onMounted(async () => {
                         {{ item.status === 'CLOSED' ? '已结束' : '进行中' }}
                       </Tag>
                     </div>
+                    <span class="wb-conv-time">
+                      {{ conversationContextLabel(item) }}
+                    </span>
                     <span class="wb-conv-time">{{ formatTime(item.createTime) }}</span>
                   </div>
                 </List.Item>
@@ -296,7 +469,7 @@ onMounted(async () => {
                 <span class="wb-chat-title">
                   {{ currentConversation ? `会话 #${currentConversation.id}` : '新会话' }}
                 </span>
-                <Tag v-if="selectedKb">{{ selectedKb.label }}</Tag>
+                <Tag v-if="currentKnowledgeContext">{{ currentKnowledgeContext }}</Tag>
               </Space>
             </template>
 
@@ -412,6 +585,7 @@ onMounted(async () => {
                 ref="inputRef"
                 v-model:value="draft"
                 :rows="3"
+                :disabled="loadingHistory"
                 placeholder="输入问题，例如：CN 122621758 A 一共有几项权利要求？"
                 class="wb-input"
                 @press-enter.prevent="send"
@@ -427,7 +601,12 @@ onMounted(async () => {
                 <Button
                   type="primary"
                   :loading="sending"
-                  :disabled="sending || !draft.trim() || !selectedKbId"
+                  :disabled="
+                    loadingHistory ||
+                    sending ||
+                    !draft.trim() ||
+                    (!currentConversationId && !selectedKbId)
+                  "
                   @click="send"
                 >
                   发送

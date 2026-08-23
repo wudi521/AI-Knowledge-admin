@@ -12,6 +12,9 @@ export namespace AiChatApi {
     id: number;
     channel?: string; // 渠道, 默认 WEB
     customerId?: string; // 客户标识, 默认 anonymous
+    kbId?: number | null; // 会话绑定的知识库
+    domainCode?: string | null; // 会话绑定的领域
+    userId?: number | null; // 会话所属用户
     status: 'ACTIVE' | 'CLOSED' | 'TRANSFERRED';
     intent?: string; // 会话意图
     summary?: string; // 会话摘要(转人工时记录)
@@ -45,6 +48,12 @@ export namespace AiChatApi {
   /** 发送消息响应 */
   export interface SendResp {
     conversationId: number; // 会话编号(新建会话时为新建会话 id)
+    messageId?: number | null; // 本轮 AI 消息编号
+    kbId?: number | null; // 实际使用的知识库
+    domainCode?: string | null; // 实际使用的领域
+    route?: string | null; // 路由结果(后端未提供时为空)
+    intent?: string | null; // 本轮识别意图
+    degraded?: boolean | null; // 是否降级
     reply?: null | string; // AI 回复内容(answerable=true 时有值)
     answerable?: boolean; // 是否可作答
     confidence?: null | number; // 证据充分度融合置信度(0~1)
@@ -63,7 +72,9 @@ export function sendChatMessage(data: {
   conversationId?: number;
   customerId?: string;
   message: string;
-  kbIds?: number[]; // 知识库绑定(专利 MVP: 必须选择, 未选后端拒绝全库检索)
+  kbId?: number;
+  /** @deprecated 仅兼容旧调用方，前端工作台不得发送。 */
+  kbIds?: number[];
 }) {
   return requestClient.post<AiChatApi.SendResp>('/chat/chat/send', data, {
     // LLM 检索+回答链路实测 10~60s, 默认 30s 会超时
