@@ -5,6 +5,7 @@ import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   Alert,
+  Avatar,
   Button,
   Card,
   Col,
@@ -39,9 +40,12 @@ const loadingConversations = ref(false);
 const loadingHistory = ref(false);
 const kbLoading = ref(false);
 const selectedKbId = ref<number>();
-const kbOptions = ref<{ label: string; value: number; domainCode?: string }[]>([]);
+const kbOptions = ref<
+  { label: string; value: number; domainCode?: string }[]
+>([]);
 const lastResult = ref<AiChatApi.SendResp>();
 const chatBox = ref<HTMLElement>();
+const inputRef = ref<{ focus?: () => void }>();
 
 let localSequence = 0;
 function localId() {
@@ -49,8 +53,12 @@ function localId() {
   return -localSequence;
 }
 
-const selectedKb = computed(() => kbOptions.value.find((kb) => kb.value === selectedKbId.value));
-const currentConversation = computed(() => conversations.value.find((c) => c.id === currentConversationId.value));
+const selectedKb = computed(() =>
+  kbOptions.value.find((kb) => kb.value === selectedKbId.value),
+);
+const currentConversation = computed(() =>
+  conversations.value.find((c) => c.id === currentConversationId.value),
+);
 
 function formatTime(value?: number | string): string {
   if (value == null || value === '') return '';
@@ -84,8 +92,10 @@ function evidenceTitle(ev: AiChatApi.EvidenceSummary): string {
   const publicationNo = evidenceMeta(ev, 'publicationNo');
   const applicationNo = evidenceMeta(ev, 'applicationNo');
   const claimNo = evidenceMeta(ev, 'claimNo');
-  const section = evidenceMeta(ev, 'sectionTitle') || evidenceMeta(ev, 'sectionType');
-  const identity = publicationNo || applicationNo || ev.documentName || '来源文档';
+  const section =
+    evidenceMeta(ev, 'sectionTitle') || evidenceMeta(ev, 'sectionType');
+  const identity =
+    publicationNo || applicationNo || ev.documentName || '来源文档';
   if (claimNo) return `${identity} · 权利要求 ${claimNo}`;
   if (section) return `${identity} · ${section}`;
   return identity;
@@ -102,6 +112,7 @@ async function loadKnowledgeBases() {
         value: kb.id!,
         domainCode: kb.domainCode,
       }));
+
     const routeKbId = Number(route.query.kbId || 0);
     if (routeKbId && kbOptions.value.some((kb) => kb.value === routeKbId)) {
       selectedKbId.value = routeKbId;
@@ -131,6 +142,7 @@ async function selectConversation(item: AiChatApi.Conversation) {
     const data = await getChatHistory(item.id);
     messages.value = data.messages || [];
     scrollBottom();
+    nextTick(() => inputRef.value?.focus?.());
   } catch {
     message.error('会话记录加载失败');
   } finally {
@@ -143,6 +155,7 @@ function newConversation() {
   messages.value = [];
   lastResult.value = undefined;
   draft.value = '';
+  nextTick(() => inputRef.value?.focus?.());
 }
 
 async function send() {
@@ -173,7 +186,10 @@ async function send() {
     lastResult.value = resp;
     currentConversationId.value = resp.conversationId;
 
-    const reply = resp.reply || resp.transferReason || '当前证据不足，暂时无法基于知识库给出可靠回答。';
+    const reply =
+      resp.reply ||
+      resp.transferReason ||
+      '当前证据不足，暂时无法基于知识库给出可靠回答。';
     messages.value.push({
       id: localId(),
       role: 'AI',
@@ -187,9 +203,10 @@ async function send() {
     await loadConversations();
     scrollBottom();
   } catch {
-    // 全局请求拦截器会提示错误；用户问题仍保留在会话区便于重试。
+    // 全局请求拦截器负责提示；保留用户问题方便重试。
   } finally {
     sending.value = false;
+    nextTick(() => inputRef.value?.focus?.());
   }
 }
 
@@ -209,23 +226,25 @@ onMounted(async () => {
     title="知识问答工作台"
     description="选择知识库后进行真实问答，查看引用证据和本次执行链路。具体模型由模型网关按场景自动选择。"
   >
-    <div class="qa-workbench">
-      <div class="workbench-toolbar">
-        <div class="toolbar-main">
+    <div class="workbench-vben">
+      <div class="wb-page-head">
+        <div class="wb-page-head-main">
           <Select
             v-model:value="selectedKbId"
             :options="kbOptions"
             :loading="kbLoading"
             placeholder="选择知识库"
-            class="kb-select"
+            class="wb-kb-select"
             show-search
             option-filter-prop="label"
           />
-          <Tag v-if="selectedKb?.domainCode === 'PATENT'" color="blue">专利知识问答</Tag>
+          <Tag v-if="selectedKb?.domainCode === 'PATENT'" color="blue">
+            专利知识问答
+          </Tag>
           <Tag v-else-if="selectedKbId" color="default">通用知识问答</Tag>
-          <span class="gateway-hint">模型由 AI 运行时自动路由</span>
+          <span class="wb-page-desc">模型由 AI 运行时自动路由</span>
         </div>
-        <Button type="primary" @click="newConversation">新建会话</Button>
+        <Button type="primary" @click="newConversation">＋ 新建会话</Button>
       </div>
 
       <Alert
@@ -233,27 +252,36 @@ onMounted(async () => {
         class="mb-4"
         type="info"
         show-icon
-        message="先选择一个知识库。问答只使用该知识库已发布的内容，不会跨库检索。"
+        message="请选择知识库后发送问题。你仍可以先输入内容，发送时系统会再次校验知识库。"
       />
 
-      <Row :gutter="16" class="workbench-body">
+      <Row :gutter="16" class="wb-body">
         <Col :span="5">
-          <Card title="历史会话" size="small" class="history-card h-full">
-            <List :data-source="conversations" :loading="loadingConversations" size="small">
+          <Card title="历史会话" size="small" class="wb-card wb-side-card">
+            <List
+              :data-source="conversations"
+              :loading="loadingConversations"
+              :pagination="false"
+              size="small"
+              class="wb-conv-list"
+            >
               <template #renderItem="{ item }">
                 <List.Item
-                  class="conversation-item cursor-pointer"
-                  :class="{ 'conversation-active': item.id === currentConversationId }"
+                  class="wb-conv-item"
+                  :class="{ 'wb-conv-active': item.id === currentConversationId }"
                   @click="selectConversation(item)"
                 >
-                  <div class="w-full">
-                    <div class="flex items-center justify-between gap-2">
-                      <span class="truncate font-medium">会话 #{{ item.id }}</span>
-                      <Tag :color="item.status === 'CLOSED' ? 'default' : 'blue'">
+                  <div class="wb-conv-main">
+                    <div class="wb-conv-head">
+                      <span class="wb-conv-name">会话 #{{ item.id }}</span>
+                      <Tag
+                        :color="item.status === 'CLOSED' ? 'default' : 'blue'"
+                        class="wb-conv-status"
+                      >
                         {{ item.status === 'CLOSED' ? '已结束' : '进行中' }}
                       </Tag>
                     </div>
-                    <div class="mt-1 text-xs text-muted-foreground">{{ formatTime(item.createTime) }}</div>
+                    <span class="wb-conv-time">{{ formatTime(item.createTime) }}</span>
                   </div>
                 </List.Item>
               </template>
@@ -262,102 +290,144 @@ onMounted(async () => {
         </Col>
 
         <Col :span="19">
-          <Card size="small" class="chat-panel h-full">
+          <Card size="small" class="wb-card wb-chat-card">
             <template #title>
-              <div class="chat-header">
-                <Space>
-                  <span class="chat-title">{{ currentConversation ? `会话 #${currentConversation.id}` : '新会话' }}</span>
-                  <Tag v-if="selectedKb">{{ selectedKb.label }}</Tag>
-                </Space>
-                <span v-if="currentConversation" class="chat-subtitle">基于已发布知识回答</span>
-              </div>
+              <Space>
+                <span class="wb-chat-title">
+                  {{ currentConversation ? `会话 #${currentConversation.id}` : '新会话' }}
+                </span>
+                <Tag v-if="selectedKb">{{ selectedKb.label }}</Tag>
+              </Space>
             </template>
 
-            <div ref="chatBox" class="chat-box">
+            <div ref="chatBox" class="wb-msgs">
               <Empty
-                v-if="messages.length === 0 && !loadingHistory"
-                class="chat-empty"
+                v-if="messages.length === 0 && !loadingHistory && !sending"
                 description="输入一个基于知识库的问题开始问答"
               />
 
               <div
                 v-for="msg in messages"
                 :key="msg.id"
-                class="message-row"
-                :class="`message-${msg.role.toLowerCase()}`"
+                class="wb-msg"
+                :class="msg.role.toLowerCase()"
               >
-                <div class="message-role">
-                  <span class="role-dot"></span>
-                  {{ msg.role === 'USER' ? '你' : msg.role === 'AI' ? '知识助手' : '系统' }}
-                </div>
+                <template v-if="msg.role === 'SYSTEM'">
+                  <div class="wb-msg-system">{{ msg.content }}</div>
+                </template>
 
-                <div class="message-card">
-                  <div class="message-content whitespace-pre-wrap">{{ msg.content }}</div>
-
-                  <div
-                    v-if="msg.role === 'AI' && msg.confidence != null"
-                    class="answer-meta"
-                  >
-                    <span>证据置信度</span>
-                    <strong>{{ Math.round(msg.confidence * 100) }}%</strong>
+                <template v-else>
+                  <div class="wb-avatar-wrap">
+                    <Avatar
+                      :size="38"
+                      class="wb-avatar"
+                      :class="msg.role.toLowerCase()"
+                    >
+                      {{ msg.role === 'AI' ? 'AI' : '你' }}
+                    </Avatar>
                   </div>
 
-                  <div v-if="msg.evidenceList?.length" class="evidence-section">
-                    <div class="evidence-heading">引用来源</div>
-                    <div
-                      v-for="(ev, index) in msg.evidenceList"
-                      :key="ev.chunkId || index"
-                      class="evidence-item"
-                    >
-                      <div class="evidence-topline">
-                        <span class="citation-index">C{{ index + 1 }}</span>
-                        <span class="evidence-title">{{ evidenceTitle(ev) }}</span>
-                        <span
-                          v-if="evidenceMeta(ev, 'pageStart')"
-                          class="evidence-page"
-                        >
-                          第 {{ evidenceMeta(ev, 'pageStart') }} 页
-                        </span>
+                  <div class="wb-msg-main">
+                    <div class="wb-msg-head">
+                      <span class="wb-msg-name">
+                        {{ msg.role === 'AI' ? '知识助手' : '你' }}
+                      </span>
+                      <span class="wb-msg-time">{{ formatTime(msg.createTime) }}</span>
+                    </div>
+
+                    <div class="wb-msg-bubble" :class="msg.role.toLowerCase()">
+                      <div class="wb-msg-text">{{ msg.content }}</div>
+
+                      <div
+                        v-if="msg.role === 'AI' && msg.confidence != null"
+                        class="wb-answer-meta"
+                      >
+                        证据置信度 {{ Math.round(msg.confidence * 100) }}%
                       </div>
-                      <div class="evidence-content line-clamp-3">
-                        {{ ev.content || '来源内容未返回' }}
+
+                      <div
+                        v-if="msg.evidenceList?.length"
+                        class="wb-ev-cards"
+                      >
+                        <div class="wb-ev-heading">引用来源</div>
+                        <div
+                          v-for="(ev, index) in msg.evidenceList"
+                          :key="ev.chunkId || index"
+                          class="wb-ev-card"
+                        >
+                          <div class="wb-ev-card-title">
+                            <span class="wb-cite-tag">C{{ index + 1 }}</span>
+                            <span class="wb-ev-title-text">{{ evidenceTitle(ev) }}</span>
+                            <span
+                              v-if="evidenceMeta(ev, 'pageStart')"
+                              class="wb-ev-page"
+                            >
+                              第 {{ evidenceMeta(ev, 'pageStart') }} 页
+                            </span>
+                          </div>
+                          <div v-if="ev.content" class="wb-ev-card-quote">
+                            {{ ev.content }}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div
+                        v-if="msg.role === 'AI' && msg.traceId"
+                        class="wb-trace-action"
+                      >
+                        <Button
+                          type="link"
+                          size="small"
+                          class="!h-auto !p-0"
+                          @click="openTrace(msg.traceId)"
+                        >
+                          查看本次执行链路 →
+                        </Button>
                       </div>
                     </div>
                   </div>
+                </template>
+              </div>
 
-                  <div v-if="msg.role === 'AI' && msg.traceId" class="trace-action">
-                    <Button
-                      type="link"
-                      size="small"
-                      class="!h-auto !p-0"
-                      @click="openTrace(msg.traceId)"
-                    >
-                      查看本次执行链路 →
-                    </Button>
+              <div v-if="sending" class="wb-msg ai">
+                <div class="wb-avatar-wrap">
+                  <Avatar :size="38" class="wb-avatar ai">AI</Avatar>
+                </div>
+                <div class="wb-msg-main">
+                  <div class="wb-msg-head">
+                    <span class="wb-msg-name">知识助手</span>
+                  </div>
+                  <div class="wb-msg-bubble ai wb-typing-bubble">
+                    <span class="wb-typing-dot"></span>
+                    <span class="wb-typing-dot"></span>
+                    <span class="wb-typing-dot"></span>
+                    <span class="wb-typing-text">正在检索知识并生成回答…</span>
                   </div>
                 </div>
               </div>
-
-              <div v-if="sending" class="thinking-row">
-                <span class="thinking-dot"></span>
-                正在检索知识并生成回答…
-              </div>
             </div>
 
-            <div class="composer">
+            <div class="wb-input-area">
               <Input.TextArea
+                ref="inputRef"
                 v-model:value="draft"
                 :rows="3"
-                :disabled="!selectedKbId || sending"
                 placeholder="输入问题，例如：CN 122621758 A 一共有几项权利要求？"
-                class="composer-input"
+                class="wb-input"
+                @press-enter.prevent="send"
               />
-              <div class="composer-footer">
-                <span class="composer-hint">回答会附带可追溯证据，不满足证据门禁时不会猜测。</span>
+              <div class="wb-input-foot">
+                <span class="wb-kb-hint">
+                  {{
+                    selectedKbId
+                      ? 'Enter 发送 · 回答基于当前知识库已发布内容'
+                      : '可先输入问题 · 发送前请选择知识库'
+                  }}
+                </span>
                 <Button
                   type="primary"
                   :loading="sending"
-                  :disabled="!selectedKbId || !draft.trim()"
+                  :disabled="sending || !draft.trim() || !selectedKbId"
                   @click="send"
                 >
                   发送
@@ -367,10 +437,12 @@ onMounted(async () => {
 
             <div
               v-if="lastResult && lastResult.answerable === false"
-              class="answer-blocked-tip"
+              class="wb-answer-blocked"
             >
-              本次未满足可靠作答条件。系统不会为了“看起来有答案”而跳过证据门禁。
-              <a v-if="lastResult.traceId" class="ml-1" @click="openTrace(lastResult.traceId)">查看原因</a>
+              本次未满足可靠作答条件。系统不会跳过证据门禁进行猜测。
+              <a v-if="lastResult.traceId" @click="openTrace(lastResult.traceId)">
+                查看原因
+              </a>
             </div>
           </Card>
         </Col>
@@ -380,378 +452,424 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.qa-workbench {
-  --qa-surface: #ffffff;
-  --qa-surface-soft: #f8fafc;
-  --qa-surface-raised: #ffffff;
-  --qa-border: #e5e7eb;
-  --qa-border-soft: #edf0f3;
-  --qa-text: #111827;
-  --qa-text-secondary: #667085;
-  --qa-user-bg: #eef5ff;
-  --qa-user-border: #d7e6ff;
-  --qa-ai-bg: #ffffff;
-  --qa-evidence-bg: #f8fafc;
-  --qa-primary-soft: rgba(22, 119, 255, 0.08);
-
-  color: var(--qa-text);
+/*
+ * 视觉层沿用该页面改版前已验证过的深浅主题策略：
+ * 直接使用 html.dark 显式覆盖，不自行依赖 Ant 内部 CSS 变量。
+ */
+.workbench-vben {
+  padding: 4px 2px 8px;
+  color: #1f2937;
+}
+html.dark .workbench-vben {
+  color: #e5e7eb;
 }
 
-.workbench-toolbar {
+.wb-page-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
 }
-
-.toolbar-main {
+.wb-page-head-main {
   display: flex;
   min-width: 0;
   flex: 1;
   align-items: center;
   gap: 10px;
 }
-
-.kb-select {
+.wb-kb-select {
   width: min(360px, 42vw);
 }
-
-.gateway-hint,
-.chat-subtitle,
-.composer-hint {
-  color: var(--qa-text-secondary);
+.wb-page-desc {
+  color: #8a94a6;
   font-size: 12px;
 }
-
-.workbench-body {
-  min-height: 640px;
+html.dark .wb-page-desc {
+  color: #6b7280;
 }
 
-.chat-header {
+.wb-body {
+  min-height: 640px;
+}
+.wb-card {
+  height: 100%;
+}
+.wb-side-card {
+  height: calc(100vh - 210px);
+  overflow: hidden;
+}
+
+/* 历史会话 */
+.wb-conv-list {
+  max-height: calc(100vh - 270px);
+  overflow-y: auto;
+}
+.wb-conv-item {
+  cursor: pointer;
+  margin: 2px 0;
+  padding: 9px 10px !important;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+.wb-conv-item:hover {
+  background: #eff6ff;
+}
+html.dark .wb-conv-item:hover {
+  background: #1e293b;
+}
+.wb-conv-active {
+  background: #dbeafe !important;
+}
+html.dark .wb-conv-active {
+  background: #1e3a8a !important;
+}
+.wb-conv-main {
+  width: 100%;
+}
+.wb-conv-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-}
-
-.chat-title {
-  font-weight: 600;
-}
-
-.chat-box {
-  min-height: 500px;
-  max-height: 61vh;
-  overflow-y: auto;
-  padding: 22px 18px 8px;
-  scroll-behavior: smooth;
-}
-
-.chat-box::-webkit-scrollbar {
-  width: 6px;
-}
-
-.chat-box::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(120, 126, 138, 0.35);
-}
-
-.chat-empty {
-  padding-top: 130px;
-}
-
-.message-row {
-  margin-bottom: 22px;
-}
-
-.message-role {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 7px;
-  color: var(--qa-text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.role-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: #94a3b8;
-}
-
-.message-ai .role-dot {
-  background: #1677ff;
-  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.11);
-}
-
-.message-user .message-role {
-  justify-content: flex-end;
-}
-
-.message-user .role-dot {
-  order: 2;
-}
-
-.message-card {
-  max-width: 88%;
-  border: 1px solid var(--qa-border-soft);
-  border-radius: 14px;
-  padding: 15px 17px;
-  background: var(--qa-ai-bg);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
-}
-
-.message-content {
-  color: var(--qa-text);
-  font-size: 14px;
-  line-height: 1.8;
-}
-
-.message-user .message-card {
-  margin-left: auto;
-  border-color: var(--qa-user-border);
-  background: var(--qa-user-bg);
-}
-
-.message-ai .message-card {
-  margin-right: auto;
-}
-
-.answer-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 12px;
-  border-radius: 999px;
-  padding: 4px 9px;
-  background: var(--qa-primary-soft);
-  color: var(--qa-text-secondary);
-  font-size: 12px;
-}
-
-.answer-meta strong {
-  color: #1677ff;
-  font-weight: 600;
-}
-
-.evidence-section {
-  margin-top: 15px;
-  border-top: 1px solid var(--qa-border-soft);
-  padding-top: 13px;
-}
-
-.evidence-heading {
-  margin-bottom: 8px;
-  color: var(--qa-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.evidence-item {
-  margin-top: 8px;
-  border: 1px solid var(--qa-border-soft);
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: var(--qa-evidence-bg);
-}
-
-.evidence-topline {
-  display: flex;
-  min-width: 0;
-  align-items: center;
   gap: 8px;
 }
-
-.citation-index {
-  flex: none;
-  border-radius: 5px;
-  padding: 2px 6px;
-  background: #1677ff;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 18px;
-}
-
-.evidence-title {
-  min-width: 0;
-  flex: 1;
+.wb-conv-name {
   overflow: hidden;
-  color: var(--qa-text);
-  font-size: 13px;
+  color: #334155;
+  font-size: 12.5px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.evidence-page {
+html.dark .wb-conv-name {
+  color: #e5e7eb;
+}
+.wb-conv-status {
   flex: none;
-  color: var(--qa-text-secondary);
+  margin: 0;
+  font-size: 10px;
+}
+.wb-conv-time {
+  display: block;
+  margin-top: 4px;
+  color: #94a3b8;
   font-size: 11px;
 }
+html.dark .wb-conv-time {
+  color: #64748b;
+}
 
-.evidence-content {
-  margin-top: 6px;
-  color: var(--qa-text-secondary);
+/* 对话区 */
+.wb-chat-card :deep(.ant-card-body) {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 270px);
+  min-height: 590px;
+  padding: 12px;
+}
+.wb-chat-title {
+  font-weight: 600;
+}
+.wb-msgs {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px 8px;
+}
+.wb-msg {
+  display: flex;
+  gap: 11px;
+  margin-bottom: 20px;
+}
+.wb-msg.user {
+  flex-direction: row-reverse;
+}
+.wb-msg.system {
+  justify-content: center;
+}
+.wb-msg-system {
+  max-width: 90%;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: #f1f5f9;
+  color: #475569;
   font-size: 12px;
-  line-height: 1.65;
+}
+html.dark .wb-msg-system {
+  border-color: #374151;
+  background: #1f2937;
+  color: #9ca3af;
 }
 
-.trace-action {
+.wb-avatar-wrap {
+  flex: none;
+  width: 40px;
+}
+.wb-avatar {
+  border: 2px solid #fff;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.16);
+}
+.wb-avatar.ai {
+  border-color: #6d28d9;
+  background: linear-gradient(135deg, #7c3aed, #6d28d9) !important;
+}
+.wb-avatar.user {
+  border-color: #1e40af;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+}
+
+.wb-msg-main {
+  display: flex;
+  max-width: 80%;
+  flex-direction: column;
+}
+.wb-msg.user .wb-msg-main {
+  align-items: flex-end;
+}
+.wb-msg-head {
+  display: flex;
+  gap: 8px;
+  margin: 0 4px 5px;
+  color: #94a3b8;
+  font-size: 11px;
+}
+.wb-msg.user .wb-msg-head {
+  flex-direction: row-reverse;
+}
+.wb-msg-name {
+  color: #64748b;
+  font-weight: 600;
+}
+html.dark .wb-msg-name {
+  color: #94a3b8;
+}
+.wb-msg-time {
+  font-size: 10px;
+}
+
+/* 使用改版前已验证的气泡配色 */
+.wb-msg-bubble {
+  padding: 11px 14px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.75;
+  word-break: break-word;
+}
+.wb-msg-bubble.ai {
+  border: 1.5px solid #cbd5e1;
+  border-top-left-radius: 6px;
+  background: #f8fafc;
+  color: #1f2937;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+html.dark .wb-msg-bubble.ai {
+  border-color: #4b5563;
+  background: #374151;
+  color: #e5e7eb;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.wb-msg-bubble.user {
+  border: 1.5px solid #1e40af;
+  border-top-right-radius: 6px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
+  box-shadow: 0 5px 18px rgba(37, 99, 235, 0.28);
+}
+html.dark .wb-msg-bubble.user {
+  border-color: #1e40af;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
+  box-shadow: 0 5px 18px rgba(37, 99, 235, 0.42);
+}
+.wb-msg-text {
+  white-space: pre-wrap;
+}
+
+.wb-answer-meta {
+  display: inline-block;
+  margin-top: 10px;
+  border-radius: 5px;
+  padding: 2px 7px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #2563eb;
+  font-size: 11px;
+}
+html.dark .wb-answer-meta {
+  background: rgba(96, 165, 250, 0.16);
+  color: #93c5fd;
+}
+
+/* 引用证据 */
+.wb-ev-cards {
   margin-top: 12px;
+  border-top: 1px solid #d1d5db;
+  padding-top: 10px;
+}
+html.dark .wb-ev-cards {
+  border-top-color: #6b7280;
+}
+.wb-ev-heading {
+  margin-bottom: 7px;
+  color: #8a94a6;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.wb-ev-card {
+  margin-top: 7px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #fff;
+}
+html.dark .wb-ev-card {
+  border-color: #4b5563;
+  background: #1f2937;
+}
+.wb-ev-card-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+.wb-cite-tag {
+  flex: none;
+  border: 1px solid #93c5fd;
+  border-radius: 5px;
+  padding: 1px 6px;
+  background: #dbeafe;
+  color: #2563eb;
+  font-size: 10px;
+  font-weight: 700;
+}
+html.dark .wb-cite-tag {
+  border-color: #2563eb;
+  background: #1e3a5f;
+  color: #93c5fd;
+}
+.wb-ev-title-text {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-ev-page {
+  flex: none;
+  color: #94a3b8;
+  font-size: 10px;
+}
+.wb-ev-card-quote {
+  display: -webkit-box;
+  margin-top: 6px;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 11.5px;
+  line-height: 1.65;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+html.dark .wb-ev-card-quote {
+  color: #aeb6c2;
+}
+.wb-trace-action {
+  margin-top: 10px;
 }
 
-.thinking-row {
+/* 思考中 */
+.wb-typing-bubble {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 2px 0 20px;
-  color: var(--qa-text-secondary);
-  font-size: 13px;
+  gap: 7px;
+}
+.wb-typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  animation: wb-blink 1.2s infinite ease-in-out;
+}
+.wb-typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.wb-typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+.wb-typing-text {
+  color: #64748b;
+  font-size: 12px;
+}
+html.dark .wb-typing-text {
+  color: #cbd5e1;
+}
+@keyframes wb-blink {
+  0%, 80%, 100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
 }
 
-.thinking-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: #1677ff;
-  animation: qa-pulse 1.3s ease-in-out infinite;
+/* 输入区：恢复改版前的简单稳定结构；输入框永远可编辑，发送时才校验知识库。 */
+.wb-input-area {
+  flex: none;
+  border-top: 1px solid #e2e8f0;
+  padding: 10px 2px 0;
 }
-
-.composer {
-  margin: 10px 18px 6px;
-  border: 1px solid var(--qa-border);
-  border-radius: 14px;
-  padding: 9px;
-  background: var(--qa-surface-raised);
-  box-shadow: 0 4px 18px rgba(16, 24, 40, 0.05);
+html.dark .wb-input-area {
+  border-top-color: #374151;
 }
-
-.composer-footer {
+.wb-input-area :deep(textarea.ant-input),
+.wb-input-area :deep(.ant-input) {
+  border-color: #d9d9d9 !important;
+  background: #fff !important;
+  color: #1f2937 !important;
+  resize: none;
+}
+html.dark .wb-input-area :deep(textarea.ant-input),
+html.dark .wb-input-area :deep(.ant-input) {
+  border-color: #4b5563 !important;
+  background: #1f2937 !important;
+  color: #e5e7eb !important;
+}
+html.dark .wb-input-area :deep(textarea.ant-input::placeholder),
+html.dark .wb-input-area :deep(.ant-input::placeholder) {
+  color: #6b7280 !important;
+}
+.wb-input-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 7px 3px 1px 7px;
+  margin-top: 8px;
 }
-
-.answer-blocked-tip {
-  margin: 8px 18px 14px;
-  color: var(--qa-text-secondary);
-  font-size: 12px;
+.wb-kb-hint,
+.wb-answer-blocked {
+  color: #8a94a6;
+  font-size: 11.5px;
 }
-
-.conversation-item {
-  margin: 2px 0;
-  border-radius: 8px;
-  padding: 10px !important;
-  transition: background 0.15s ease;
+html.dark .wb-kb-hint,
+html.dark .wb-answer-blocked {
+  color: #6b7280;
 }
-
-.conversation-item:hover {
-  background: var(--qa-surface-soft);
-}
-
-.conversation-active {
-  background: var(--qa-primary-soft) !important;
-}
-
-@keyframes qa-pulse {
-  0%, 100% { opacity: 0.35; transform: scale(0.85); }
-  50% { opacity: 1; transform: scale(1); }
-}
-
-/* Ant Design 内部输入框在某些主题组合下没有跟随暗色，这里只约束本工作台。 */
-.qa-workbench :deep(.composer-input.ant-input) {
-  border: 0 !important;
-  box-shadow: none !important;
-  background: transparent !important;
-  color: var(--qa-text) !important;
-  resize: none;
-}
-
-.qa-workbench :deep(.composer-input.ant-input::placeholder) {
-  color: var(--qa-text-secondary) !important;
-  opacity: 0.72;
-}
-
-/* 暗色模式：不再依赖 --ant-color-bg-container fallback，避免白色大卡片。 */
-:global(.dark) .qa-workbench {
-  --qa-surface: #15171a;
-  --qa-surface-soft: #1d2025;
-  --qa-surface-raised: #191c20;
-  --qa-border: #343841;
-  --qa-border-soft: #2a2e35;
-  --qa-text: #e7e9ee;
-  --qa-text-secondary: #9299a6;
-  --qa-user-bg: #202b3c;
-  --qa-user-border: #2d4160;
-  --qa-ai-bg: #1a1d21;
-  --qa-evidence-bg: #16191d;
-  --qa-primary-soft: rgba(64, 150, 255, 0.12);
-}
-
-:global(.dark) .qa-workbench :deep(.ant-card) {
-  border-color: var(--qa-border-soft);
-  background: var(--qa-surface);
-}
-
-:global(.dark) .qa-workbench :deep(.ant-card-head) {
-  border-bottom-color: var(--qa-border-soft);
-  color: var(--qa-text);
-}
-
-:global(.dark) .qa-workbench :deep(.ant-list-item) {
-  border-block-end-color: var(--qa-border-soft);
-  color: var(--qa-text);
-}
-
-:global(.dark) .qa-workbench :deep(.ant-empty-description) {
-  color: var(--qa-text-secondary);
-}
-
-:global(.dark) .qa-workbench :deep(.ant-select-selector),
-:global(.dark) .qa-workbench :deep(.ant-input),
-:global(.dark) .qa-workbench :deep(textarea.ant-input) {
-  border-color: var(--qa-border) !important;
-  background: var(--qa-surface-raised) !important;
-  color: var(--qa-text) !important;
-}
-
-:global(.dark) .qa-workbench :deep(.composer-input.ant-input) {
-  background: transparent !important;
-}
-
-:global(.dark) .qa-workbench :deep(.ant-select-selection-placeholder),
-:global(.dark) .qa-workbench :deep(.ant-select-selection-item) {
-  color: var(--qa-text-secondary);
-}
-
-:global(.dark) .qa-workbench :deep(.ant-btn-default) {
-  border-color: var(--qa-border);
-  background: var(--qa-surface-raised);
-  color: var(--qa-text);
-}
-
-:global(.dark) .qa-workbench .message-card {
-  box-shadow: none;
-}
-
-:global(.dark) .qa-workbench .composer {
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+.wb-answer-blocked {
+  margin-top: 8px;
 }
 
 @media (max-width: 1100px) {
-  .gateway-hint,
-  .chat-subtitle,
-  .composer-hint {
+  .wb-page-desc {
     display: none;
   }
-
-  .message-card {
-    max-width: 96%;
+  .wb-msg-main {
+    max-width: 90%;
   }
 }
 </style>
