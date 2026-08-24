@@ -19,39 +19,60 @@ export namespace AiEvidenceApi {
     verdict: 'SUPPORTED' | 'UNSUPPORTED';
     evidenceIndex: number;
   }
-  /** 语义分析详情(检索透传, 供检索诊断) */
   export interface AnalysisInfo {
     intent?: null | string;
     entities?: string[];
     rewrites?: string[];
+    route?: null | string;
     subQuestions?: string[];
     success?: boolean | null;
   }
-  /** 通道召回统计(检索透传) */
   export interface ChannelStat {
     bm25?: null | number;
     vector?: null | number;
     fused?: null | number;
   }
+  export interface StageTiming {
+    elapsedMs?: null | number;
+    errorCode?: null | string;
+    errorMessage?: null | string;
+    inputSummary?: null | string;
+    outputSummary?: null | string;
+    seq?: null | number;
+    skipped?: boolean | null;
+    stage?: null | string;
+    status?: null | string;
+  }
   export interface EvaluateResp {
     traceId: string;
     query: string;
     answerable: boolean;
-    confidence: null | number; // 0~1
+    confidence: null | number;
     consultable: boolean | null;
-    refusalReason: null | string; // answerable=false 时必填
-    evidence: EvidenceItem[]; // 去重后, 按得分降序
-    conflicts: ConflictItem[]; // 索引 = evidence 列表位置
-    answer: null | string; // 含 [C1] 引用; claimFail=true 时恒 null
+    refusalReason: null | string;
+    evidence: EvidenceItem[];
+    conflicts: ConflictItem[];
+    answer: null | string;
     claims: ClaimItem[] | null;
     claimFail: boolean | null;
     elapsedMs: null | number;
-    analysis?: null | AnalysisInfo; // 语义分析详情(意图/实体/改写/子问题)
-    channels?: null | ChannelStat; // 通道召回统计(BM25/向量/融合)
+    analysis?: null | AnalysisInfo;
+    channels?: null | ChannelStat;
+    /** 对外兼容主路由：STRUCTURED_QUERY/SCOPED_RAG/HYBRID_RAG/RULE/CLARIFY/ABSTAIN 等 */
+    route?: null | string;
+    /** 内部真实执行模式：STRUCTURED/EXACT_TEXT_SEARCH/PER_ENTITY_SEMANTIC/CROSS_ENTITY_COMPARE/... */
+    executionMode?: null | string;
+    intent?: null | string;
+    reasonCode?: null | string;
+    stages?: null | StageTiming[];
   }
 }
 
-/** 证据评估(充分性判定 + 冲突检测 + Claim 验证 + 回答生成) */
+/**
+ * 知识搜索/证据评估统一入口。
+ * 与聊天共用服务端 Query Planner → Structured/Exact/RAG/Compare → Evidence 执行内核；
+ * 本接口为单轮搜索，不携带 conversation history/context。
+ */
 export function evaluateEvidence(data: {
   kbIds?: number[];
   query: string;
@@ -61,8 +82,8 @@ export function evaluateEvidence(data: {
     '/evidence/evaluate',
     data,
     {
-      // 评估链路含多次 LLM 调用(qwen3-8b CPU 推理, 实测 12~60s), 默认 30s 会超时
-      timeout: 180_000,
+      // 服务端 QueryPlan 默认 20s、生成管线默认 20s；给网关/序列化留出余量，禁止沿用 180s 慢请求容忍。
+      timeout: 35_000,
     },
   );
 }
