@@ -19,6 +19,7 @@ import {
 
 import { evaluateEvidence } from '#/api/ai/evidence';
 import { getKnowledgeBasePage } from '#/api/ai/knowledge';
+import QueryExecutionInspector from '../components/QueryExecutionInspector.vue';
 
 defineOptions({ name: 'AiRetrieval' });
 
@@ -147,7 +148,7 @@ function renderAnswer(answer?: string): string {
         <Input
           v-model:value="query"
           class="w-96"
-          placeholder="输入检索内容，如：哪些专利比较相似？"
+          placeholder="输入检索内容，如：包含“磁涌”的专利，把申请号和公布号列出来"
           allow-clear
           @press-enter="handleSearch"
         />
@@ -163,92 +164,75 @@ function renderAnswer(answer?: string): string {
           检索评估
         </Button>
         <span v-if="loading" class="text-xs text-muted-foreground">
-          正在执行统一查询计划…结构化/精确检索会直接返回，语义问答可能需要数秒
+          正在执行统一查询计划…
         </span>
       </div>
 
-      <!-- Query Planner / 检索诊断 -->
+      <!-- Query Planner / 总览 -->
       <div
         v-if="evidenceResult"
-        class="mb-4 flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4"
+        class="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4"
       >
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-sm text-muted-foreground">主路由:</span>
+          <span class="text-sm font-semibold">执行总览</span>
+          <span class="ml-2 text-sm text-muted-foreground">主路由:</span>
           <Tag color="blue">{{ evidenceResult.route || 'UNKNOWN' }}</Tag>
-          <span class="ml-2 text-sm text-muted-foreground">执行模式:</span>
+          <span class="text-sm text-muted-foreground">执行模式:</span>
           <Tag color="purple">{{ evidenceResult.executionMode || 'DEFAULT_RAG' }}</Tag>
-          <span class="ml-2 text-sm text-muted-foreground">意图:</span>
+          <span class="text-sm text-muted-foreground">意图:</span>
           <Tag v-if="intent" :color="intent.color">{{ intent.text }}</Tag>
           <Tag v-else color="default">未识别</Tag>
-          <span
-            v-if="evidenceResult.channels"
-            class="ml-auto text-xs text-muted-foreground"
-          >
+          <span class="ml-auto text-xs text-muted-foreground">
+            总耗时 {{ evidenceResult.elapsedMs ?? '-' }} ms
+          </span>
+        </div>
+
+        <div class="rounded-md border border-border bg-background/70 p-3 text-sm leading-6">
+          <div><b>用户问题：</b>{{ evidenceResult.query }}</div>
+          <div v-if="evidenceResult.answer"><b>最终回答：</b>{{ evidenceResult.answer }}</div>
+          <div v-else-if="evidenceResult.refusalReason">
+            <b>最终结果：</b>{{ evidenceResult.refusalReason }}
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span v-if="evidenceResult.channels">
             BM25 {{ evidenceResult.channels.bm25 ?? 0 }} /
             向量 {{ evidenceResult.channels.vector ?? 0 }} /
             融合 {{ evidenceResult.channels.fused ?? 0 }}
           </span>
-        </div>
-
-        <div v-if="evidenceResult.reasonCode" class="flex items-center gap-2">
-          <span class="text-sm text-muted-foreground">原因码:</span>
-          <Tag color="warning">{{ evidenceResult.reasonCode }}</Tag>
-        </div>
-
-        <div
-          v-if="evidenceResult.analysis?.entities?.length"
-          class="flex flex-wrap items-center gap-2"
-        >
-          <span class="text-sm text-muted-foreground">实体:</span>
-          <Tag v-for="entity in evidenceResult.analysis.entities" :key="entity">
-            {{ entity }}
+          <Tag v-if="evidenceResult.reasonCode" color="warning">
+            {{ evidenceResult.reasonCode }}
           </Tag>
-        </div>
-        <div
-          v-if="evidenceResult.analysis?.rewrites?.length"
-          class="flex flex-wrap items-center gap-2"
-        >
-          <span class="text-sm text-muted-foreground">改写变体:</span>
-          <Tag
-            v-for="rewrite in evidenceResult.analysis.rewrites"
-            :key="rewrite"
-            color="processing"
-          >
-            {{ rewrite }}
-          </Tag>
-        </div>
-        <div
-          v-if="evidenceResult.analysis?.subQuestions?.length"
-          class="flex flex-wrap items-center gap-2"
-        >
-          <span class="text-sm text-muted-foreground">子问题:</span>
-          <Tag
-            v-for="question in evidenceResult.analysis.subQuestions"
-            :key="question"
-            color="cyan"
-          >
-            {{ question }}
-          </Tag>
-        </div>
-
-        <div v-if="evidenceResult.stages?.length" class="flex flex-col gap-1">
-          <span class="text-sm text-muted-foreground">执行阶段:</span>
-          <div class="flex flex-wrap gap-2">
-            <Tag
-              v-for="stage in evidenceResult.stages"
-              :key="`${stage.seq}-${stage.stage}`"
-              :color="stage.status === 'FAILED' ? 'error' : stage.skipped ? 'default' : 'success'"
-            >
-              {{ stage.stage }} · {{ stage.status }} · {{ stage.elapsedMs ?? 0 }} ms
-            </Tag>
-          </div>
+          <span v-if="evidenceResult.analysis?.entities?.length">
+            实体：{{ evidenceResult.analysis.entities.join('、') }}
+          </span>
         </div>
       </div>
+
+      <!-- 第一版 Query Execution Inspector：逐节点看输入/输出 -->
+      <Card v-if="evidenceResult" size="small" class="border-border">
+        <template #title>
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <div class="font-semibold">查询执行回放</div>
+              <div class="mt-1 text-xs font-normal text-muted-foreground">
+                展开每个节点查看：本阶段收到什么、实际得到什么、为什么跳过/失败。
+                不展示隐藏思维链、系统 Prompt 或 embedding 浮点值。
+              </div>
+            </div>
+            <span v-if="evidenceResult.traceId" class="font-mono text-xs text-muted-foreground">
+              {{ evidenceResult.traceId }}
+            </span>
+          </div>
+        </template>
+        <QueryExecutionInspector :stages="evidenceResult.stages" />
+      </Card>
 
       <Card
         v-if="evidenceResult && evidenceResult.answerable === false && (evidenceResult.refusalReason || '').includes('产品')"
         size="small"
-        class="mb-4 border-red-500/50 bg-red-50/60 dark:bg-red-950/20"
+        class="border-red-500/50 bg-red-50/60 dark:bg-red-950/20"
       >
         <div class="mb-1 flex items-center gap-2">
           <span class="text-sm font-bold">无法回答</span>
@@ -262,28 +246,13 @@ function renderAnswer(answer?: string): string {
       <Card v-if="evidenceResult" size="small" class="border-border">
         <template #title>
           <div class="flex flex-wrap items-center gap-2">
-            <span class="text-sm font-bold">证据评估</span>
-            <span
-              v-if="evidenceResult.traceId"
-              class="font-mono text-xs text-muted-foreground"
-            >
-              {{ evidenceResult.traceId }}
-            </span>
+            <span class="text-sm font-bold">结果与证据</span>
             <span
               v-if="evidenceResult.elapsedMs != null"
               class="ml-auto text-xs text-muted-foreground"
             >
               耗时 {{ evidenceResult.elapsedMs }} ms
             </span>
-          </div>
-          <div class="mt-1 text-xs text-muted-foreground">
-            单轮知识搜索；与对话工作台共用 Query Planner、检索执行器、证据与验证主链
-          </div>
-          <div
-            v-if="evidenceResult.query"
-            class="mt-1 truncate text-xs text-muted-foreground"
-          >
-            查询: {{ evidenceResult.query }}
           </div>
         </template>
 
@@ -374,16 +343,13 @@ function renderAnswer(answer?: string): string {
             class="rounded-lg border border-blue-500/40 bg-blue-50/50 p-3 dark:bg-blue-950/20"
           >
             <div class="mb-1 flex items-center gap-2">
-              <span class="text-sm font-bold">回答</span>
+              <span class="text-sm font-bold">最终回答</span>
               <Tag color="blue">统一查询链</Tag>
             </div>
             <div
               class="whitespace-pre-wrap break-all text-sm leading-6 text-card-foreground"
               v-html="renderAnswer(evidenceResult.answer)"
             ></div>
-            <div class="mt-1 text-xs text-muted-foreground">
-              引用编号 [C1][C2]… 对应下方证据列表顺序
-            </div>
           </div>
 
           <template v-if="evidenceResult.evidence.length > 0">
