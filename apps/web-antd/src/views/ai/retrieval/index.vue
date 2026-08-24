@@ -24,16 +24,14 @@ defineOptions({ name: 'AiRetrieval' });
 
 const route = useRoute();
 
-/** 检索输入 */
 const query = ref('');
-const kbIds = ref<number[]>([]); // 选中的知识库(空 = 全部可见)
+const kbIds = ref<number[]>([]);
 const loading = ref(false);
 
-/** 证据评估(单接口: 内部含检索+判定+生成, 双回答者收敛后答案与检索诊断均由评估响应透传) */
+/** 单轮知识搜索，与聊天共用服务端 Query Planner / Evidence 执行内核。 */
 const evidenceResult = ref<AiEvidenceApi.EvaluateResp | null>(null);
-const expandedEvidence = ref<Set<number>>(new Set()); // 展开的证据 chunkId
+const expandedEvidence = ref<Set<number>>(new Set());
 
-/** 被冲突引用的证据索引集合(用于红色边框高亮) */
 const conflictIndexes = computed(() => {
   const set = new Set<number>();
   for (const conflict of evidenceResult.value?.conflicts || []) {
@@ -43,22 +41,16 @@ const conflictIndexes = computed(() => {
   return set;
 });
 
-/** 展开/收起证据内容 */
 function toggleEvidence(chunkId: number) {
   const next = new Set(expandedEvidence.value);
-  if (next.has(chunkId)) {
-    next.delete(chunkId);
-  } else {
-    next.add(chunkId);
-  }
+  if (next.has(chunkId)) next.delete(chunkId);
+  else next.add(chunkId);
   expandedEvidence.value = next;
 }
 
-/** 知识库选项(全部可见知识库) */
 const kbOptions = ref<{ label: string; value: number }[]>([]);
 
 onMounted(async () => {
-  // 预选知识库(从知识库列表「检索测试」按钮进入)
   const initialKbId = Number(route.query.kbId);
   try {
     const data = await getKnowledgeBasePage({ pageNo: 1, pageSize: 100 });
@@ -77,7 +69,6 @@ onMounted(async () => {
   }
 });
 
-/** 意图 -> Tag */
 const INTENT_TAG: Record<string, { color: string; text: string }> = {
   WARRANTY: { color: 'blue', text: '保修' },
   REFUND: { color: 'volcano', text: '退款' },
@@ -87,26 +78,23 @@ const INTENT_TAG: Record<string, { color: string; text: string }> = {
   OTHER: { color: 'default', text: '其他' },
 };
 
-/** 当前意图(评估响应透传的语义分析意图: 知识库意图名 / 固定枚举 / OUT_OF_SCOPE) */
 const intent = computed(() => {
-  const matchedIntent = evidenceResult.value?.analysis?.intent;
-  if (!matchedIntent) {
-    return null;
-  }
+  const matchedIntent =
+    evidenceResult.value?.intent || evidenceResult.value?.analysis?.intent;
+  if (!matchedIntent) return null;
   if (matchedIntent === 'OUT_OF_SCOPE') {
     return { color: 'error', text: '超出知识库范围' };
   }
   return INTENT_TAG[matchedIntent] || { color: 'default', text: matchedIntent };
 });
 
-/** 通道徽标颜色 */
 const CHANNEL_COLOR: Record<string, string> = {
   bm25: 'blue',
   vector: 'green',
   fused: 'purple',
+  exact_text: 'cyan',
 };
 
-/** 证据评估(单接口: 内部含检索召回+判定+生成; 双回答者收敛后检索诊断由评估响应透传) */
 async function handleSearch() {
   const keyword = query.value.trim();
   if (!keyword) {
@@ -128,7 +116,7 @@ async function handleSearch() {
     loading.value = false;
   }
 }
-/** HTML 转义(先转义再高亮, 防 XSS) */
+
 function escapeHtml(text: string): string {
   return text
     .replaceAll('&', '&amp;')
@@ -138,12 +126,10 @@ function escapeHtml(text: string): string {
     .replaceAll("'", '&#39;');
 }
 
-/** 分数保留 2 位 */
 function formatScore(score?: number): string {
   return score == null ? '-' : score.toFixed(2);
 }
 
-/** AI 总结渲染: 先转义, 再把 [C1][C2] 引用编号美化(防 XSS) */
 function renderAnswer(answer?: string): string {
   const safe = escapeHtml(answer || '');
   return safe.replace(
@@ -157,12 +143,11 @@ function renderAnswer(answer?: string): string {
 <template>
   <Page auto-content-height>
     <div class="flex flex-col gap-4 p-4">
-      <!-- 检索栏 -->
       <div class="flex flex-wrap items-center gap-3">
         <Input
           v-model:value="query"
           class="w-96"
-          placeholder="输入检索内容, 如: 保修期多久"
+          placeholder="输入检索内容，如：哪些专利比较相似？"
           allow-clear
           @press-enter="handleSearch"
         />
@@ -174,71 +159,92 @@ function renderAnswer(answer?: string): string {
           placeholder="全部可见知识库"
           allow-clear
         />
-        <Button
-          type="primary"
-          :loading="loading"
-          @click="handleSearch"
-        >
+        <Button type="primary" :loading="loading" @click="handleSearch">
           检索评估
         </Button>
-        <span
-          v-if="loading"
-          class="text-xs text-muted-foreground"
-        >
-          评估中…含检索+判定+多轮 AI 验证, 约需 10~60 秒
+        <span v-if="loading" class="text-xs text-muted-foreground">
+          正在执行统一查询计划…结构化/精确检索会直接返回，语义问答可能需要数秒
         </span>
       </div>
 
-      <!-- 检索诊断区(意图/实体/改写/子问题/通道统计; 评估响应透传) -->
+      <!-- Query Planner / 检索诊断 -->
       <div
-        v-if="evidenceResult?.analysis || evidenceResult?.channels"
+        v-if="evidenceResult"
         class="mb-4 flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4"
       >
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-sm text-muted-foreground">意图:</span>
-          <Tag v-if="intent" :color="intent.color">
-            {{ intent.text }}
-          </Tag>
-          <Tag v-if="!intent" color="default">未识别</Tag>
+          <span class="text-sm text-muted-foreground">主路由:</span>
+          <Tag color="blue">{{ evidenceResult.route || 'UNKNOWN' }}</Tag>
+          <span class="ml-2 text-sm text-muted-foreground">执行模式:</span>
+          <Tag color="purple">{{ evidenceResult.executionMode || 'DEFAULT_RAG' }}</Tag>
+          <span class="ml-2 text-sm text-muted-foreground">意图:</span>
+          <Tag v-if="intent" :color="intent.color">{{ intent.text }}</Tag>
+          <Tag v-else color="default">未识别</Tag>
           <span
-            v-if="evidenceResult?.channels"
+            v-if="evidenceResult.channels"
             class="ml-auto text-xs text-muted-foreground"
           >
-            通道统计: BM25 召回 {{ evidenceResult.channels.bm25 ?? 0 }} /
-            向量召回 {{ evidenceResult.channels.vector ?? 0 }} /
+            BM25 {{ evidenceResult.channels.bm25 ?? 0 }} /
+            向量 {{ evidenceResult.channels.vector ?? 0 }} /
             融合 {{ evidenceResult.channels.fused ?? 0 }}
           </span>
         </div>
-        <div v-if="evidenceResult?.analysis?.entities?.length" class="flex flex-wrap items-center gap-2">
+
+        <div v-if="evidenceResult.reasonCode" class="flex items-center gap-2">
+          <span class="text-sm text-muted-foreground">原因码:</span>
+          <Tag color="warning">{{ evidenceResult.reasonCode }}</Tag>
+        </div>
+
+        <div
+          v-if="evidenceResult.analysis?.entities?.length"
+          class="flex flex-wrap items-center gap-2"
+        >
           <span class="text-sm text-muted-foreground">实体:</span>
           <Tag v-for="entity in evidenceResult.analysis.entities" :key="entity">
             {{ entity }}
           </Tag>
         </div>
-        <div v-if="evidenceResult?.analysis?.rewrites?.length" class="flex flex-wrap items-center gap-2">
+        <div
+          v-if="evidenceResult.analysis?.rewrites?.length"
+          class="flex flex-wrap items-center gap-2"
+        >
           <span class="text-sm text-muted-foreground">改写变体:</span>
-          <Tag v-for="rewrite in evidenceResult.analysis.rewrites" :key="rewrite" color="processing">
+          <Tag
+            v-for="rewrite in evidenceResult.analysis.rewrites"
+            :key="rewrite"
+            color="processing"
+          >
             {{ rewrite }}
           </Tag>
         </div>
         <div
-          v-if="evidenceResult?.analysis?.subQuestions?.length"
+          v-if="evidenceResult.analysis?.subQuestions?.length"
           class="flex flex-wrap items-center gap-2"
         >
           <span class="text-sm text-muted-foreground">子问题:</span>
-          <Tag v-for="question in evidenceResult.analysis.subQuestions" :key="question" color="cyan">
+          <Tag
+            v-for="question in evidenceResult.analysis.subQuestions"
+            :key="question"
+            color="cyan"
+          >
             {{ question }}
           </Tag>
         </div>
-        <div
-          v-if="evidenceResult?.analysis && !evidenceResult.analysis.success"
-          class="text-xs text-muted-foreground"
-        >
-          语义分析未成功, 已直接走关键词检索
+
+        <div v-if="evidenceResult.stages?.length" class="flex flex-col gap-1">
+          <span class="text-sm text-muted-foreground">执行阶段:</span>
+          <div class="flex flex-wrap gap-2">
+            <Tag
+              v-for="stage in evidenceResult.stages"
+              :key="`${stage.seq}-${stage.stage}`"
+              :color="stage.status === 'FAILED' ? 'error' : stage.skipped ? 'default' : 'success'"
+            >
+              {{ stage.stage }} · {{ stage.status }} · {{ stage.elapsedMs ?? 0 }} ms
+            </Tag>
+          </div>
         </div>
       </div>
 
-      <!-- 产品不匹配拒绝作答(结构化门禁, 评估响应透传) -->
       <Card
         v-if="evidenceResult && evidenceResult.answerable === false && (evidenceResult.refusalReason || '').includes('产品')"
         size="small"
@@ -248,15 +254,12 @@ function renderAnswer(answer?: string): string {
           <span class="text-sm font-bold">无法回答</span>
           <Tag color="error">产品/品牌不匹配</Tag>
         </div>
-        <div class="leading-6 text-card-foreground">{{ evidenceResult.refusalReason }}</div>
+        <div class="leading-6 text-card-foreground">
+          {{ evidenceResult.refusalReason }}
+        </div>
       </Card>
 
-      <!-- 证据评估判定面板(单列) -->
-      <Card
-        v-if="evidenceResult"
-        size="small"
-        class="border-border"
-      >
+      <Card v-if="evidenceResult" size="small" class="border-border">
         <template #title>
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-sm font-bold">证据评估</span>
@@ -274,26 +277,21 @@ function renderAnswer(answer?: string): string {
             </span>
           </div>
           <div class="mt-1 text-xs text-muted-foreground">
-            答案统一由证据管线生成(检索召回 + 充分性判定 + Claim 逐句验证), 与对话工作台同链路
+            单轮知识搜索；与对话工作台共用 Query Planner、检索执行器、证据与验证主链
           </div>
           <div
             v-if="evidenceResult.query"
             class="mt-1 truncate text-xs text-muted-foreground"
           >
-            评估查询: {{ evidenceResult.query }}
+            查询: {{ evidenceResult.query }}
           </div>
         </template>
 
         <div class="flex flex-col gap-3">
-          <!-- a. 充分性判定 -->
-          <div
-            class="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3"
-          >
+          <div class="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3">
             <div class="flex flex-wrap items-center gap-2">
               <span class="text-sm font-medium">充分性判定</span>
-              <Tag v-if="evidenceResult.answerable" color="success">
-                可作答
-              </Tag>
+              <Tag v-if="evidenceResult.answerable" color="success">可作答</Tag>
               <Tag v-else color="error">拒绝作答</Tag>
               <Tag v-if="evidenceResult.consultable" color="processing">
                 可转人工咨询
@@ -308,10 +306,7 @@ function renderAnswer(answer?: string): string {
               </span>
               <Progress
                 class="flex-1"
-                :percent="Math.min(
-                  100,
-                  Math.max(0, Math.round(evidenceResult.confidence * 100)),
-                )"
+                :percent="Math.min(100, Math.max(0, Math.round(evidenceResult.confidence * 100)))"
                 size="small"
                 :status="evidenceResult.answerable ? 'normal' : 'exception'"
               />
@@ -324,7 +319,6 @@ function renderAnswer(answer?: string): string {
             </div>
           </div>
 
-          <!-- b. 冲突区 -->
           <Alert
             v-if="evidenceResult.conflicts.length > 0"
             type="error"
@@ -338,20 +332,19 @@ function renderAnswer(answer?: string): string {
                   :key="index"
                   class="text-sm"
                 >
-                  证据 #{{ conflict.evidenceIndexA }} ↔
-                  #{{ conflict.evidenceIndexB }}: {{ conflict.reason }}
+                  证据 #{{ conflict.evidenceIndexA }} ↔ #{{ conflict.evidenceIndexB }}:
+                  {{ conflict.reason }}
                 </div>
               </div>
             </template>
           </Alert>
 
-          <!-- c. Claim 逐句 -->
           <template v-if="evidenceResult.claims && evidenceResult.claims.length > 0">
             <Alert
               v-if="evidenceResult.claimFail"
               type="error"
               show-icon
-              message="回答未能通过证据验证, 已禁止输出"
+              message="回答未能通过证据验证，已禁止输出"
             />
             <div class="text-sm font-medium">Claim 逐句验证</div>
             <div
@@ -365,9 +358,7 @@ function renderAnswer(answer?: string): string {
               >
                 {{ claim.verdict === 'SUPPORTED' ? '✓ 支持' : '✗ 不支持' }}
               </Tag>
-              <span
-                class="flex-1 break-all text-sm leading-6 text-card-foreground"
-              >
+              <span class="flex-1 break-all text-sm leading-6 text-card-foreground">
                 {{ claim.text }}
               </span>
               <span
@@ -378,16 +369,14 @@ function renderAnswer(answer?: string): string {
             </div>
           </template>
 
-          <!-- d. 回答 -->
           <div
             v-if="evidenceResult.answer"
             class="rounded-lg border border-blue-500/40 bg-blue-50/50 p-3 dark:bg-blue-950/20"
           >
             <div class="mb-1 flex items-center gap-2">
               <span class="text-sm font-bold">回答</span>
-              <Tag color="blue">基于证据生成</Tag>
+              <Tag color="blue">统一查询链</Tag>
             </div>
-            <!-- eslint-disable-next-line vue/no-v-html -->
             <div
               class="whitespace-pre-wrap break-all text-sm leading-6 text-card-foreground"
               v-html="renderAnswer(evidenceResult.answer)"
@@ -397,7 +386,6 @@ function renderAnswer(answer?: string): string {
             </div>
           </div>
 
-          <!-- e. 证据列表 -->
           <template v-if="evidenceResult.evidence.length > 0">
             <div class="text-sm font-medium">
               证据列表 ({{ evidenceResult.evidence.length }})
@@ -406,19 +394,13 @@ function renderAnswer(answer?: string): string {
               v-for="(item, index) in evidenceResult.evidence"
               :key="item.chunkId"
               size="small"
-              :class="
-                conflictIndexes.has(index)
-                  ? 'border-red-500/60'
-                  : 'border-border'
-              "
+              :class="conflictIndexes.has(index) ? 'border-red-500/60' : 'border-border'"
             >
               <template #title>
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="font-mono text-sm">#{{ item.chunkId }}</span>
                   <span class="font-medium">{{ item.documentName || '-' }}</span>
-                  <Tag v-if="item.versionNo" color="default">
-                    {{ item.versionNo }}
-                  </Tag>
+                  <Tag v-if="item.versionNo" color="default">{{ item.versionNo }}</Tag>
                   <span class="ml-auto text-sm text-muted-foreground">
                     得分 {{ formatScore(item.score) }}
                   </span>
@@ -427,9 +409,7 @@ function renderAnswer(answer?: string): string {
               <div class="flex flex-col gap-2">
                 <div
                   class="whitespace-pre-wrap break-all text-sm leading-6"
-                  :class="
-                    expandedEvidence.has(item.chunkId) ? '' : 'line-clamp-3'
-                  "
+                  :class="expandedEvidence.has(item.chunkId) ? '' : 'line-clamp-3'"
                 >
                   {{ item.content }}
                 </div>
@@ -456,10 +436,7 @@ function renderAnswer(answer?: string): string {
               </div>
             </Card>
           </template>
-          <div
-            v-else
-            class="py-6 text-center text-muted-foreground"
-          >
+          <div v-else class="py-6 text-center text-muted-foreground">
             未检索到相关证据
           </div>
         </div>
