@@ -33,32 +33,30 @@ const router = createRouter({
 });
 
 /**
- * Knowledge QA Workbench 的 conversationId 只是“刷新恢复锚点”，不是一个新的业务页面。
+ * Knowledge QA Workbench 的 conversationId 是“工作区运行状态”，不是一个新的 Tab Route。
  *
- * Vben Tabs 会把 query 变化识别成新的 tab route。工作台在首轮 SSE 收到 conversationId 后
- * 原本调用 router.replace({ query }), 会导致“每发一轮多一个 AI 对话工作台页签”，甚至让
- * 多个页面实例分别持有不同 currentConversationId。
+ * 之前无论 router.replace({ query }) 还是 history.replaceState()，都会让 Vben Tabs 的 route/fullPath
+ * 与浏览器地址产生竞争，最终出现“一轮一个 AI 对话工作台页签”和多个组件实例持有不同会话的问题。
  *
- * 对这种仅同步 conversationId 的 replace，不触发 Vue Router 导航，只替换浏览器 URL：
- * - 当前组件实例和会话状态保持不变；
- * - Vben 不会创建新 Tab；
- * - URL 仍保留 conversationId，F5/深链恢复能力不受影响；
- * - 新建会话清除 conversationId 时同样只更新当前 URL。
+ * 这里改为：
+ * 1. 运行期间仅把 conversationId 放进 sessionStorage，不产生任何 router/history 导航；
+ * 2. F5/重新进入页面时，beforeEach 再把该锚点恢复到首个路由解析中；
+ * 3. 新建会话清除锚点后，下一轮会创建新 conversationId，但当前 Tab 始终不变。
  */
+const CONVERSATION_ANCHOR_PREFIX = 'ai-qa:conversation:';
 const nativeReplace = router.replace.bind(router);
-router.replace = ((to: RouteLocationRaw) => {
-  if (isConversationAnchorReplace(to)) {
-    const current = router.currentRoute.value;
-    const target = router.resolve({
-      path: current.path,
-      query: (to as { query?: Record<string, any> }).query || {},
-      hash: current.hash,
-    });
-    window.history.replaceState(window.history.state, '', target.href);
-    return Promise.resolve(undefined);
-  }
-  return nativeReplace(to);
-}) as typeof router.replace;
+
+function anchorKey(path: string) {
+  return `${CONVERSATION_ANCHOR_PREFIX}${path}`;
+}
+
+function getConversationIdFromQuery(query?: Record<string, any>): string | undefined {
+  if (!query) return undefined;
+  const value = query.conversationId;
+  if (value == null || value === '') return undefined;
+  const id = Number(Array.isArray(value) ? value[0] : value);
+  return Number.isFinite(id) && id > 0 ? String(id) : undefined;
+}
 
 function isConversationAnchorReplace(to: RouteLocationRaw): boolean {
   if (typeof to === 'string' || !to || typeof to !== 'object') {
@@ -71,30 +69,56 @@ function isConversationAnchorReplace(to: RouteLocationRaw): boolean {
     path?: string;
     query?: Record<string, any>;
   };
-  // 只接管组件内部 router.replace({ query })；显式 path/name/params 导航保持 Vue Router 原语义。
-  if (target.path || target.name || target.params || target.hash) {
-    return false;
-  }
-  if (!target.query) {
-    return false;
+  // 仅接管工作台内部 syncConversationUrl() 这种 router.replace({ query })。
+  return Boolean(
+    target.query &&
+      !target.path &&
+      !target.name &&
+      !target.params &&
+      !target.hash,
+  );
+}
+
+router.replace = ((to: RouteLocationRaw) => {
+  if (!isConversationAnchorReplace(to)) {
+    return nativeReplace(to);
   }
 
-  // 设置 conversationId，或当前浏览器 URL 已有 conversationId 而本次准备清除它。
-  // 后者覆盖“＋ 新建会话”场景，即使 vue-router 内部 currentRoute 仍保持原 query，也能正确清 URL。
-  const targetHasConversationId = Object.prototype.hasOwnProperty.call(
-    target.query,
-    'conversationId',
-  );
-  const browserHasConversationId = (() => {
-    try {
-      const href = window.location.href;
-      return /(?:[?&])conversationId=\d+/.test(href);
-    } catch {
-      return false;
-    }
-  })();
-  return targetHasConversationId || browserHasConversationId;
-}
+  const path = router.currentRoute.value.path || window.location.pathname;
+  const query = (to as { query?: Record<string, any> }).query || {};
+  const conversationId = getConversationIdFromQuery(query);
+  const key = anchorKey(path);
+  if (conversationId) {
+    sessionStorage.setItem(key, conversationId);
+  } else {
+    sessionStorage.removeItem(key);
+  }
+
+  // 关键：不触发 router.replace / history.replaceState。
+  // 当前 Vue 组件实例、Vben Tab key、SSE 状态保持原样。
+  return Promise.resolve(undefined);
+}) as typeof router.replace;
+
+// F5/重新进入时恢复最近会话。只在真正的路由导航阶段执行一次，不参与每轮消息发送。
+router.beforeEach((to) => {
+  const explicit = getConversationIdFromQuery(to.query as Record<string, any>);
+  if (explicit) {
+    sessionStorage.setItem(anchorKey(to.path), explicit);
+    return true;
+  }
+
+  const saved = sessionStorage.getItem(anchorKey(to.path));
+  if (!saved) {
+    return true;
+  }
+
+  return {
+    path: to.path,
+    query: { ...to.query, conversationId: saved },
+    hash: to.hash,
+    replace: true,
+  };
+});
 
 const resetRoutes = () => resetStaticRoutes(router, routes);
 
