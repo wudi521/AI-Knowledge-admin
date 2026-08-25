@@ -1,13 +1,26 @@
 import { requestClient } from '#/api/request';
 
 export namespace AiEvidenceApi {
+  export type EvaluateMode = 'AGENT_V1' | 'DEFAULT' | 'V3';
+
   export interface EvidenceItem {
-    chunkId: number;
+    evidenceId?: null | number;
+    chunkId?: null | number;
     content: string;
-    documentName: string;
-    versionNo?: string;
-    score: number;
-    channels: string[];
+    documentName?: null | string;
+    documentId?: null | number;
+    versionNo?: null | string;
+    score?: null | number;
+    channels?: null | string[];
+    evidenceType?: null | string;
+    applicationNo?: null | string;
+    publicationNo?: null | string;
+    sectionType?: null | string;
+    sectionTitle?: null | string;
+    claimNo?: null | string;
+    filters?: null | string;
+    metric?: null | string;
+    aggregateValue?: null | number;
   }
   export interface ConflictItem {
     evidenceIndexA: number;
@@ -43,6 +56,18 @@ export namespace AiEvidenceApi {
     stage?: null | string;
     status?: null | string;
   }
+  export interface StructuredResult {
+    entityIds?: null | number[];
+    entityKeys?: null | string[];
+    entityType?: null | string;
+    metricCode?: null | string;
+    fieldCode?: null | string;
+    operation?: null | string;
+    queryType?: null | string;
+    scopeType?: null | string;
+    truncated?: boolean | null;
+    entityCount?: null | number;
+  }
   export interface EvaluateResp {
     traceId: string;
     query: string;
@@ -58,32 +83,56 @@ export namespace AiEvidenceApi {
     elapsedMs: null | number;
     analysis?: null | AnalysisInfo;
     channels?: null | ChannelStat;
-    /** 对外兼容主路由：STRUCTURED_QUERY/SCOPED_RAG/HYBRID_RAG/RULE/CLARIFY/ABSTAIN 等 */
     route?: null | string;
-    /** 内部真实执行模式：STRUCTURED/EXACT_TEXT_SEARCH/PER_ENTITY_SEMANTIC/CROSS_ENTITY_COMPARE/... */
     executionMode?: null | string;
     intent?: null | string;
     reasonCode?: null | string;
     stages?: null | StageTiming[];
+    structuredResult?: null | StructuredResult;
+    clarifyQuestion?: null | string;
+    timedOut?: boolean | null;
+    verificationDegraded?: boolean | null;
+  }
+
+  export interface EvaluateReq {
+    kbIds?: number[];
+    query: string;
+    topK?: number;
   }
 }
 
-/**
- * 知识搜索/证据评估统一入口。
- * 与聊天共用服务端 Query Planner → Structured/Exact/RAG/Compare → Evidence 执行内核；
- * 本接口为单轮搜索，不携带 conversation history/context。
- */
-export function evaluateEvidence(data: {
-  kbIds?: number[];
-  query: string;
-  topK?: number;
-}) {
+const EVALUATE_TIMEOUT = 35_000;
+
+/** 默认路由：按服务端 yudao.evidence.agent.mode 决定 Agent/V3/fallback。 */
+export function evaluateEvidence(data: AiEvidenceApi.EvaluateReq) {
   return requestClient.post<AiEvidenceApi.EvaluateResp>(
     '/evidence/evaluate',
     data,
-    {
-      // 服务端 QueryPlan 默认 20s、生成管线默认 20s；给网关/序列化留出余量，禁止沿用 180s 慢请求容忍。
-      timeout: 35_000,
-    },
+    { timeout: EVALUATE_TIMEOUT },
+  );
+}
+
+/** 强制 Agentic RAG V1.1，用于回归/A-B，不受默认路由模式影响。 */
+export function evaluateEvidenceAgentV1(data: AiEvidenceApi.EvaluateReq) {
+  return requestClient.post<AiEvidenceApi.EvaluateResp>(
+    '/evidence/evaluate-agent-v1',
+    data,
+    { timeout: EVALUATE_TIMEOUT },
+  );
+}
+
+/** 强制旧 Query Engine V3，用于与 Agent V1.1 做同题基线对照。 */
+export function evaluateEvidenceV3(data: AiEvidenceApi.EvaluateReq) {
+  return requestClient.post<AiEvidenceApi.EvaluateResp>(
+    '/evidence/evaluate-v3',
+    data,
+    { timeout: EVALUATE_TIMEOUT },
+  );
+}
+
+/** 按 traceId 从持久化 ai_query_trace_stage 读取事后执行回放。 */
+export function getAgentTrace(traceId: string) {
+  return requestClient.get<AiEvidenceApi.StageTiming[]>(
+    `/evidence/agent-trace/${encodeURIComponent(traceId)}`,
   );
 }
