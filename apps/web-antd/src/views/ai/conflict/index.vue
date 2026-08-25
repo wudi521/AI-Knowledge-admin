@@ -1,21 +1,32 @@
 <script lang="ts" setup>
 import type { AiConflictApi } from '#/api/ai/conflict';
 
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
 
 import { useRoute } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
-import { Modal, Tag, message } from 'ant-design-vue';
+import {
+  Button,
+  Empty,
+  Input,
+  InputNumber,
+  Modal,
+  Tag,
+  message,
+} from 'ant-design-vue';
 
 import { getConflictList, resolveConflict } from '#/api/ai/conflict';
 
 const route = useRoute();
 
-const docId = ref<number | undefined>(route.query.docId ? Number(route.query.docId) : undefined);
+const docId = ref<number | undefined>(
+  route.query.docId ? Number(route.query.docId) : undefined,
+);
 const conflicts = ref<AiConflictApi.Conflict[]>([]);
 const loading = ref(false);
+const queried = ref(false);
 
 /** 状态 -> Tag */
 const STATUS_TAG: Record<string, { color: string; text: string }> = {
@@ -37,6 +48,7 @@ async function handleQuery() {
     message.error('查询失败');
   } finally {
     loading.value = false;
+    queried.value = true;
   }
 }
 
@@ -45,7 +57,10 @@ const resolveOpen = ref(false);
 const resolveRow = ref<AiConflictApi.Conflict>();
 const resolveType = ref<'RESOLVED_NEW' | 'RESOLVED_OLD'>('RESOLVED_NEW');
 const resolveComment = ref('');
-function openResolve(row: AiConflictApi.Conflict, type: 'RESOLVED_NEW' | 'RESOLVED_OLD') {
+function openResolve(
+  row: AiConflictApi.Conflict,
+  type: 'RESOLVED_NEW' | 'RESOLVED_OLD',
+) {
   resolveRow.value = row;
   resolveType.value = type;
   resolveComment.value = '';
@@ -68,29 +83,34 @@ async function confirmResolve() {
     message.error('裁决失败');
   }
 }
+
+onMounted(() => {
+  if (docId.value) handleQuery();
+});
 </script>
 
 <template>
   <Page auto-content-height>
     <div class="mb-4 flex items-center gap-2">
-      <a-input-number
+      <InputNumber
         v-model:value="docId"
         class="w-44"
         placeholder="文档编号"
         :controls="false"
         :disabled="loading"
       />
-      <a-button type="primary" :loading="loading" @click="handleQuery">
+      <Button type="primary" :loading="loading" @click="handleQuery">
         查询冲突
-      </a-button>
+      </Button>
       <span class="text-sm text-muted-foreground">
         裁决前不发布新版本(按旧版本口径), 冲突裁决留痕
       </span>
     </div>
 
-    <div v-if="conflicts.length === 0" class="text-muted-foreground">
-      暂无冲突记录
-    </div>
+    <Empty
+      v-if="!loading && conflicts.length === 0"
+      :description="queried ? '该文档暂无冲突记录' : '请输入文档编号后查询'"
+    />
 
     <div v-else class="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <div
@@ -106,11 +126,15 @@ async function confirmResolve() {
         </div>
         <div class="mb-3 grid grid-cols-2 gap-3 text-sm">
           <div class="rounded bg-muted p-3">
-            <div class="mb-1 font-semibold text-muted-foreground">旧版本表述</div>
+            <div class="mb-1 font-semibold text-muted-foreground">
+              旧版本表述
+            </div>
             <div class="whitespace-pre-wrap">{{ c.oldContent }}</div>
           </div>
           <div class="rounded bg-muted p-3">
-            <div class="mb-1 font-semibold text-muted-foreground">新版本表述</div>
+            <div class="mb-1 font-semibold text-muted-foreground">
+              新版本表述
+            </div>
             <div class="whitespace-pre-wrap">{{ c.newContent }}</div>
           </div>
         </div>
@@ -124,16 +148,16 @@ async function confirmResolve() {
           </span>
         </div>
         <div v-if="c.status === 'PENDING'" class="flex gap-2">
-          <a-button
+          <Button
             type="primary"
             size="small"
             @click="openResolve(c, 'RESOLVED_NEW')"
           >
             以新版为准·发布
-          </a-button>
-          <a-button danger size="small" @click="openResolve(c, 'RESOLVED_OLD')">
+          </Button>
+          <Button danger size="small" @click="openResolve(c, 'RESOLVED_OLD')">
             以旧版为准·驳回
-          </a-button>
+          </Button>
         </div>
       </div>
     </div>
@@ -153,7 +177,7 @@ async function confirmResolve() {
             : '以旧版为准: 解除冲突并自动驳回新版本关联条目, 新版本将无法发布'
         }}
       </p>
-      <a-textarea
+      <Input.TextArea
         v-model:value="resolveComment"
         :rows="2"
         placeholder="裁决意见(可选)"

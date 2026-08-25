@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue';
+import { ChevronDown, ChevronRight } from '@vben/icons';
 import { Empty, Tag } from 'ant-design-vue';
 
 export interface QueryExecutionStage {
@@ -20,11 +21,25 @@ const props = withDefaults(
     stages?: QueryExecutionStage[] | null;
     defaultExpanded?: boolean;
   }>(),
-  { stages: () => [], defaultExpanded: true },
+  { stages: () => [], defaultExpanded: false },
 );
 
 const expanded = ref<Set<number>>(new Set());
 const initialized = ref(false);
+
+const STAGE_TEXT: Record<string, string> = {
+  ANALYZE: '理解问题',
+  REWRITE: '查询改写',
+  SPLIT: '问题拆解',
+  SCOPE_FILTER: '范围过滤',
+  BM25: '关键词检索',
+  VECTOR: '语义检索',
+  FUSION: '结果融合',
+  RERANK: '相关性重排',
+  EVIDENCE: '证据构建',
+  GENERATE: '生成回答',
+  VERIFY: '答案验证',
+};
 
 const normalizedStages = computed(() => {
   const list = props.stages || [];
@@ -51,7 +66,8 @@ function statusColor(stage: QueryExecutionStage) {
 }
 
 function stageTitle(stage: QueryExecutionStage) {
-  return `${stage.seq ?? '-'} · ${stage.stage || 'UNKNOWN'}`;
+  const code = stage.stage || 'UNKNOWN';
+  return `${stage.seq ?? '-'} · ${STAGE_TEXT[code] || code}`;
 }
 </script>
 
@@ -62,12 +78,16 @@ function stageTitle(stage: QueryExecutionStage) {
       :key="`${stage.seq ?? index}-${stage.stage ?? 'stage'}`"
       class="qe-stage"
       :class="{
-        'qe-stage-failed': stage.status === 'FAILED' || stage.status === 'REJECTED',
+        'qe-stage-failed':
+          stage.status === 'FAILED' || stage.status === 'REJECTED',
         'qe-stage-skipped': stage.skipped || stage.status === 'SKIPPED',
       }"
     >
       <button class="qe-stage-head" type="button" @click="toggle(index)">
-        <span class="qe-toggle">{{ expanded.has(index) ? '▾' : '▸' }}</span>
+        <span class="qe-toggle">
+          <ChevronDown v-if="expanded.has(index)" class="size-4" />
+          <ChevronRight v-else class="size-4" />
+        </span>
         <span class="qe-stage-name">{{ stageTitle(stage) }}</span>
         <Tag :color="statusColor(stage)">{{ stage.status || '-' }}</Tag>
         <span class="qe-stage-ms">{{ stage.elapsedMs ?? 0 }} ms</span>
@@ -92,10 +112,13 @@ function stageTitle(stage: QueryExecutionStage) {
           <div v-if="stage.errorMessage">{{ stage.errorMessage }}</div>
         </div>
         <div
-          v-if="!stage.inputSummary && !stage.outputSummary && !stage.errorMessage"
+          v-if="
+            !stage.inputSummary && !stage.outputSummary && !stage.errorMessage
+          "
           class="qe-empty-detail"
         >
-          当前节点还没有更深的诊断数据。若这里是问题来源，需要继续把执行器内部数据下沉到 Trace。
+          当前节点还没有更深的诊断数据。若这里是问题来源，需要继续把执行器内部数据下沉到
+          Trace。
         </div>
       </div>
     </div>

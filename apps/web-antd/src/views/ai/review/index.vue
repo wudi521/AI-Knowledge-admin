@@ -4,7 +4,7 @@ import type { ActionItem } from '#/adapter/vxe-table';
 import type { AiReviewApi } from '#/api/ai/review';
 import type { KnowledgeDocument } from '#/api/ai/knowledge';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -24,10 +24,7 @@ import {
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getChunk } from '#/api/ai/chunk';
 import type { AiChunkApi } from '#/api/ai/chunk';
-import {
-  getDocumentPage,
-  getKnowledgeBasePage,
-} from '#/api/ai/knowledge';
+import { getDocumentPage, getKnowledgeBasePage } from '#/api/ai/knowledge';
 import {
   approveReviewItem,
   getReviewItemPage,
@@ -35,6 +32,13 @@ import {
 } from '#/api/ai/review';
 import { publishVersion, rejectVersion } from '#/api/ai/version';
 import { docMetaField } from '../document/data';
+import ChunkModal from '../document/chunk-modal.vue';
+import {
+  KNOWLEDGE_ROUTES,
+  knowledgeConflictRoute,
+  knowledgeEvaluationRoute,
+  knowledgeVersionRoute,
+} from '../knowledge-routes';
 
 const route = useRoute();
 const router = useRouter();
@@ -44,6 +48,10 @@ const reviewDocs = ref<KnowledgeDocument[]>([]);
 const docsLoading = ref(false);
 const kbDomainMap = ref<Record<number, string>>({});
 const selectedDoc = ref<KnowledgeDocument>();
+const reviewContentOpen = ref(false);
+const kbIdFilter = ref<number | undefined>(
+  route.query.kbId ? Number(route.query.kbId) : undefined,
+);
 const docIdFilter = ref<number | undefined>(
   route.query.docId ? Number(route.query.docId) : undefined,
 );
@@ -56,15 +64,24 @@ async function loadReviewDocuments() {
   docsLoading.value = true;
   try {
     const [docs, kbs] = await Promise.all([
-      getDocumentPage({ pageNo: 1, pageSize: 200, parseStatus: 'REVIEW' }),
+      getDocumentPage({
+        kbId: kbIdFilter.value,
+        pageNo: 1,
+        pageSize: 200,
+        parseStatus: 'REVIEW',
+      }),
       getKnowledgeBasePage({ pageNo: 1, pageSize: 200 }),
     ]);
     reviewDocs.value = docs.list || [];
     kbDomainMap.value = Object.fromEntries(
-      (kbs.list || []).filter((kb) => kb.id != null).map((kb) => [kb.id!, kb.domainCode || 'GENERAL']),
+      (kbs.list || [])
+        .filter((kb) => kb.id != null)
+        .map((kb) => [kb.id!, kb.domainCode || 'GENERAL']),
     );
     if (docIdFilter.value) {
-      const match = reviewDocs.value.find((doc) => doc.id === docIdFilter.value);
+      const match = reviewDocs.value.find(
+        (doc) => doc.id === docIdFilter.value,
+      );
       if (match) selectDocument(match);
     }
   } catch {
@@ -75,21 +92,35 @@ async function loadReviewDocuments() {
 }
 
 /** 选择文档：PATENT 走文档级确认；GENERAL 再进入条目级审核。 */
-function selectDocument(doc: KnowledgeDocument) {
+async function selectDocument(doc: KnowledgeDocument) {
   selectedDoc.value = doc;
   docIdFilter.value = doc.id;
-  if (domainOf(doc) !== 'PATENT') {
-    currentTab.value = 'PENDING';
-    gridApi.query();
+  if (domainOf(doc) === 'PATENT') {
+    reviewContentOpen.value = true;
+    return;
   }
+  currentTab.value = 'PENDING';
+  await nextTick();
+  gridApi.query();
 }
 
 function openDocumentTrace(doc: KnowledgeDocument) {
-  router.push({ path: '/kb/ops/document-trace', query: { documentId: doc.id } });
+  router.push({
+    path: KNOWLEDGE_ROUTES.documentTrace,
+    query: { documentId: doc.id },
+  });
 }
 
 function openQuality(doc: KnowledgeDocument) {
-  router.push({ path: '/ai/eval', query: { kbId: doc.kbId } });
+  router.push(knowledgeEvaluationRoute(doc.kbId));
+}
+
+function openVersions(doc: KnowledgeDocument) {
+  if (doc.id) router.push(knowledgeVersionRoute(doc.id));
+}
+
+function openConflicts(doc: KnowledgeDocument) {
+  if (doc.id) router.push(knowledgeConflictRoute(doc.id));
 }
 
 /** 文档级发布：所有领域最终都走同一 VersionService 门禁(审核/冲突/评测/索引)。 */
@@ -233,24 +264,50 @@ const gridOptions: VxeTableGridOptions<AiReviewApi.ReviewItem> = {
   columns: [
     { type: 'expand', width: 40, slots: { content: 'expand_content' } },
     { field: 'title', title: '主题', minWidth: 180, showOverflow: true },
-    { field: 'itemType', title: '类型', width: 90, slots: { default: 'itemType' } },
-    { field: 'riskLevel', title: '风险', width: 90, slots: { default: 'riskLevel' } },
+    {
+      field: 'itemType',
+      title: '类型',
+      width: 90,
+      slots: { default: 'itemType' },
+    },
+    {
+      field: 'riskLevel',
+      title: '风险',
+      width: 90,
+      slots: { default: 'riskLevel' },
+    },
     { field: 'content', title: '知识内容', minWidth: 280, showOverflow: true },
     {
-      field: 'aiConfidence', title: 'AI 置信度', width: 100,
-      formatter: ({ row }: any) => row.aiConfidence == null ? '-' : Number(row.aiConfidence).toFixed(2),
+      field: 'aiConfidence',
+      title: 'AI 置信度',
+      width: 100,
+      formatter: ({ row }: any) =>
+        row.aiConfidence == null ? '-' : Number(row.aiConfidence).toFixed(2),
     },
-    { field: 'chunkId', title: '来源证据', width: 110, slots: { default: 'chunkId' } },
+    {
+      field: 'chunkId',
+      title: '来源证据',
+      width: 110,
+      slots: { default: 'chunkId' },
+    },
     { field: 'reviewer', title: '审核人', width: 90 },
     { field: 'status', title: '状态', width: 90, slots: { default: 'status' } },
-    { title: '操作', width: 160, fixed: 'right', slots: { default: 'actions' } },
+    {
+      title: '操作',
+      width: 160,
+      fixed: 'right',
+      slots: { default: 'actions' },
+    },
   ],
   height: 420,
   keepSource: true,
   proxyConfig: {
     ajax: {
       query: async ({ page }) => {
-        if (!selectedDoc.value?.id || domainOf(selectedDoc.value) === 'PATENT') {
+        if (
+          !selectedDoc.value?.id ||
+          domainOf(selectedDoc.value) === 'PATENT'
+        ) {
           return { list: [], total: 0 };
         }
         return await getReviewItemPage({
@@ -269,8 +326,19 @@ const gridOptions: VxeTableGridOptions<AiReviewApi.ReviewItem> = {
 function buildActions(row: AiReviewApi.ReviewItem): ActionItem[] {
   if (row.status !== 'PENDING') return [];
   return [
-    { label: '通过', type: 'link', icon: ACTION_ICON.AUDIT, onClick: () => handleApprove(row) },
-    { label: '驳回', type: 'link', danger: true, icon: ACTION_ICON.CLOSE, onClick: () => openReject(row) },
+    {
+      label: '通过',
+      type: 'link',
+      icon: ACTION_ICON.AUDIT,
+      onClick: () => handleApprove(row),
+    },
+    {
+      label: '驳回',
+      type: 'link',
+      danger: true,
+      icon: ACTION_ICON.CLOSE,
+      onClick: () => openReject(row),
+    },
   ];
 }
 
@@ -283,7 +351,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
   } as any,
 });
 
-const isPatentSelected = computed(() => domainOf(selectedDoc.value) === 'PATENT');
+const isPatentSelected = computed(
+  () => domainOf(selectedDoc.value) === 'PATENT',
+);
 
 onMounted(loadReviewDocuments);
 </script>
@@ -322,28 +392,50 @@ onMounted(loadReviewDocuments);
         <Table.Column title="领域信息" :width="260">
           <template #default="{ record }">
             <template v-if="domainOf(record) === 'PATENT'">
-              {{ docMetaField(record.domainMetadata, 'publicationNo') || docMetaField(record.domainMetadata, 'applicationNo') || '-' }}
+              {{
+                docMetaField(record.domainMetadata, 'publicationNo') ||
+                docMetaField(record.domainMetadata, 'applicationNo') ||
+                '-'
+              }}
               <span class="text-muted-foreground">
-                · {{ docMetaField(record.domainMetadata, 'title') || '未识别发明名称' }}
+                ·
+                {{
+                  docMetaField(record.domainMetadata, 'title') ||
+                  '未识别发明名称'
+                }}
               </span>
             </template>
             <template v-else>知识条目审核</template>
           </template>
         </Table.Column>
-        <Table.Column title="操作" :width="360" fixed="right">
+        <Table.Column title="操作" :width="500" fixed="right">
           <template #default="{ record }">
             <Space>
               <Button size="small" @click="selectDocument(record)">
                 {{ domainOf(record) === 'PATENT' ? '审核内容' : '审核条目' }}
               </Button>
-              <Button size="small" @click="openDocumentTrace(record)">处理链路</Button>
-              <Button type="primary" size="small" @click="publishDocument(record)">发布</Button>
-              <Button danger size="small" @click="openRejectVersion(record)">驳回</Button>
+              <Button size="small" @click="openVersions(record)">版本</Button>
+              <Button size="small" @click="openConflicts(record)">冲突</Button>
+              <Button size="small" @click="openDocumentTrace(record)"
+                >处理链路</Button
+              >
+              <Button
+                type="primary"
+                size="small"
+                @click="publishDocument(record)"
+                >发布</Button
+              >
+              <Button danger size="small" @click="openRejectVersion(record)"
+                >驳回</Button
+              >
             </Space>
           </template>
         </Table.Column>
       </Table>
-      <Empty v-if="!docsLoading && reviewDocs.length === 0" description="当前没有待审核文档" />
+      <Empty
+        v-if="!docsLoading && reviewDocs.length === 0"
+        description="当前没有待审核文档"
+      />
     </Card>
 
     <Card v-if="selectedDoc" size="small" class="mb-4">
@@ -359,18 +451,37 @@ onMounted(loadReviewDocuments);
 
       <template v-if="isPatentSelected">
         <Descriptions bordered size="small" :column="3">
-          <Descriptions.Item label="申请号">{{ docMetaField(selectedDoc.domainMetadata, 'applicationNo') || '-' }}</Descriptions.Item>
-          <Descriptions.Item label="公布号">{{ docMetaField(selectedDoc.domainMetadata, 'publicationNo') || '-' }}</Descriptions.Item>
-          <Descriptions.Item label="发明名称">{{ docMetaField(selectedDoc.domainMetadata, 'title') || '-' }}</Descriptions.Item>
-          <Descriptions.Item label="申请人">{{ docMetaField(selectedDoc.domainMetadata, 'applicants') || '-' }}</Descriptions.Item>
-          <Descriptions.Item label="权利要求数">{{ docMetaField(selectedDoc.domainMetadata, 'claimCount') || '-' }}</Descriptions.Item>
-          <Descriptions.Item label="知识单元">{{ selectedDoc.chunkCount ?? '-' }}</Descriptions.Item>
+          <Descriptions.Item label="申请号">{{
+            docMetaField(selectedDoc.domainMetadata, 'applicationNo') || '-'
+          }}</Descriptions.Item>
+          <Descriptions.Item label="公布号">{{
+            docMetaField(selectedDoc.domainMetadata, 'publicationNo') || '-'
+          }}</Descriptions.Item>
+          <Descriptions.Item label="发明名称">{{
+            docMetaField(selectedDoc.domainMetadata, 'title') || '-'
+          }}</Descriptions.Item>
+          <Descriptions.Item label="申请人">{{
+            docMetaField(selectedDoc.domainMetadata, 'applicants') || '-'
+          }}</Descriptions.Item>
+          <Descriptions.Item label="权利要求数">{{
+            docMetaField(selectedDoc.domainMetadata, 'claimCount') || '-'
+          }}</Descriptions.Item>
+          <Descriptions.Item label="知识单元">{{
+            selectedDoc.chunkCount ?? '-'
+          }}</Descriptions.Item>
         </Descriptions>
         <div class="mt-3 flex gap-2">
-          <Button @click="openDocumentTrace(selectedDoc)">查看正文与处理链路</Button>
+          <Button @click="reviewContentOpen = true">审核内容</Button>
+          <Button @click="openVersions(selectedDoc)">版本记录</Button>
+          <Button @click="openConflicts(selectedDoc)">冲突裁决</Button>
+          <Button @click="openDocumentTrace(selectedDoc)">处理链路</Button>
           <Button @click="openQuality(selectedDoc)">质量评测</Button>
-          <Button type="primary" @click="publishDocument(selectedDoc)">确认并发布</Button>
-          <Button danger @click="openRejectVersion(selectedDoc)">驳回版本</Button>
+          <Button type="primary" @click="publishDocument(selectedDoc)"
+            >确认并发布</Button
+          >
+          <Button danger @click="openRejectVersion(selectedDoc)"
+            >驳回版本</Button
+          >
         </div>
       </template>
 
@@ -388,51 +499,94 @@ onMounted(loadReviewDocuments);
             </Button>
           </Space>
           <Space>
-            <Button @click="router.push({ path: '/ai/conflict', query: { docId: selectedDoc?.id } })">冲突处理</Button>
+            <Button @click="openConflicts(selectedDoc)"> 冲突处理 </Button>
+            <Button @click="openVersions(selectedDoc)">版本记录</Button>
             <Button @click="openQuality(selectedDoc)">质量评测</Button>
-            <Button type="primary" @click="publishDocument(selectedDoc)">发布当前版本</Button>
+            <Button type="primary" @click="publishDocument(selectedDoc)"
+              >发布当前版本</Button
+            >
           </Space>
         </div>
         <Grid>
           <template #itemType="{ row }">
-            <Tag :color="ITEM_TYPE_TAG[row.itemType]?.color || 'default'">{{ ITEM_TYPE_TAG[row.itemType]?.text || row.itemType }}</Tag>
+            <Tag :color="ITEM_TYPE_TAG[row.itemType]?.color || 'default'">{{
+              ITEM_TYPE_TAG[row.itemType]?.text || row.itemType
+            }}</Tag>
           </template>
           <template #riskLevel="{ row }">
-            <Tag :color="RISK_TAG[row.riskLevel]?.color || 'default'">{{ RISK_TAG[row.riskLevel]?.text || row.riskLevel }}</Tag>
+            <Tag :color="RISK_TAG[row.riskLevel]?.color || 'default'">{{
+              RISK_TAG[row.riskLevel]?.text || row.riskLevel
+            }}</Tag>
           </template>
           <template #status="{ row }">
-            <Tag :color="STATUS_TAG[row.status]?.color || 'default'">{{ STATUS_TAG[row.status]?.text || row.status }}</Tag>
+            <Tag :color="STATUS_TAG[row.status]?.color || 'default'">{{
+              STATUS_TAG[row.status]?.text || row.status
+            }}</Tag>
           </template>
           <template #chunkId="{ row }">
-            <a v-if="row.chunkId" @click="openChunkDetail(row.chunkId)">查看来源</a>
+            <a v-if="row.chunkId" @click="openChunkDetail(row.chunkId)"
+              >查看来源</a
+            >
             <span v-else class="text-muted-foreground">-</span>
           </template>
           <template #expand_content="{ row }">
-            <div class="whitespace-pre-wrap border-l-4 border-blue-500 px-3 py-4 leading-6">
-              {{ chunkContents[row.chunkId ?? -1] ?? (row.chunkId ? '来源内容加载中…' : '无匹配来源') }}
+            <div
+              class="whitespace-pre-wrap border-l-4 border-blue-500 px-3 py-4 leading-6"
+            >
+              {{
+                chunkContents[row.chunkId ?? -1] ??
+                (row.chunkId ? '来源内容加载中…' : '无匹配来源')
+              }}
             </div>
           </template>
-          <template #actions="{ row }"><TableAction :actions="buildActions(row)" /></template>
+          <template #actions="{ row }"
+            ><TableAction :actions="buildActions(row)"
+          /></template>
         </Grid>
       </template>
     </Card>
 
     <Modal v-model:open="rejectOpen" title="驳回知识条目" @ok="confirmReject">
       <p class="mb-2 text-muted-foreground">{{ rejectRow?.title }}</p>
-      <a-textarea v-model:value="rejectReason" :rows="3" placeholder="请填写驳回原因" />
+      <a-textarea
+        v-model:value="rejectReason"
+        :rows="3"
+        placeholder="请填写驳回原因"
+      />
     </Modal>
 
-    <Modal v-model:open="rejectVersionOpen" title="驳回文档版本" @ok="confirmRejectVersion">
+    <Modal
+      v-model:open="rejectVersionOpen"
+      title="驳回文档版本"
+      @ok="confirmRejectVersion"
+    >
       <p class="mb-2">{{ rejectDoc?.name }} · {{ rejectDoc?.versionNo }}</p>
-      <a-textarea v-model:value="rejectVersionReason" :rows="3" placeholder="请填写驳回原因；驳回后版本回到草稿态" />
+      <a-textarea
+        v-model:value="rejectVersionReason"
+        :rows="3"
+        placeholder="请填写驳回原因；驳回后版本回到草稿态"
+      />
     </Modal>
 
-    <Modal v-model:open="chunkDetailOpen" title="来源内容" width="720px" :footer="null">
+    <Modal
+      v-model:open="chunkDetailOpen"
+      title="来源内容"
+      width="720px"
+      :footer="null"
+    >
       <template v-if="chunkDetail">
-        <div class="max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 leading-6">
+        <div
+          class="max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 leading-6"
+        >
           {{ chunkDetail.content }}
         </div>
       </template>
     </Modal>
+
+    <ChunkModal
+      v-model:open="reviewContentOpen"
+      context="review"
+      :document-id="selectedDoc?.id"
+    />
   </Page>
 </template>

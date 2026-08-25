@@ -20,6 +20,12 @@ import { uploadFile } from '#/api/infra/file';
 
 import ChunkModal from './chunk-modal.vue';
 import { useGridColumns, useGridFormSchema } from './data';
+import {
+  KNOWLEDGE_ROUTES,
+  knowledgeConflictRoute,
+  knowledgeReviewRoute,
+  knowledgeVersionRoute,
+} from '../knowledge-routes';
 
 const route = useRoute();
 const router = useRouter();
@@ -38,8 +44,15 @@ function handleRefresh() {
 function getDocType(name: string): string {
   const ext = (name.split('.').pop() || '').toLowerCase();
   const map: Record<string, string> = {
-    md: 'MD', pdf: 'PDF', doc: 'WORD', docx: 'WORD', xls: 'EXCEL', xlsx: 'EXCEL',
-    ppt: 'PPT', pptx: 'PPT', txt: 'TXT',
+    md: 'MD',
+    pdf: 'PDF',
+    doc: 'WORD',
+    docx: 'WORD',
+    xls: 'EXCEL',
+    xlsx: 'EXCEL',
+    ppt: 'PPT',
+    pptx: 'PPT',
+    txt: 'TXT',
   };
   return map[ext] || 'OTHER';
 }
@@ -47,7 +60,9 @@ function getDocType(name: string): string {
 async function calcFileHash(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
   const digest = await crypto.subtle.digest('SHA-256', buffer);
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 async function handleUploadFile(file: File) {
@@ -58,7 +73,10 @@ async function handleUploadFile(file: File) {
   }
   try {
     message.loading({ content: `正在上传：${file.name}`, key: 'upload' });
-    const url = (await uploadFile({ file, directory: 'kb-docs' } as any)) as unknown as string;
+    const url = (await uploadFile({
+      file,
+      directory: 'kb-docs',
+    } as any)) as unknown as string;
     const fileHash = await calcFileHash(file);
     const newDocId = await createDocument({
       kbId,
@@ -68,11 +86,17 @@ async function handleUploadFile(file: File) {
       fileHash,
       chunkStrategy: 'auto',
     });
-    message.success({ content: `「${file.name}」上传成功，系统已开始自动处理`, key: 'upload' });
+    message.success({
+      content: `「${file.name}」上传成功，系统已开始自动处理`,
+      key: 'upload',
+    });
     handleRefresh();
     pollRowStatus(newDocId);
   } catch (e: any) {
-    message.error({ content: `「${file.name}」${e?.message || '上传失败'}`, key: 'upload' });
+    message.error({
+      content: `「${file.name}」${e?.message || '上传失败'}`,
+      key: 'upload',
+    });
   }
   return false;
 }
@@ -104,28 +128,75 @@ const STATUS_TAG: Record<string, { color: string; text: string }> = {
 };
 
 function goReview(row: KnowledgeDocument) {
-  router.push({ path: '/ai/review', query: { docId: row.id, status: 'PENDING' } });
+  router.push(knowledgeReviewRoute({ documentId: row.id, kbId: row.kbId }));
 }
 
 function viewTrace(row: KnowledgeDocument) {
-  router.push({ path: '/kb/ops/document-trace', query: { documentId: row.id } });
+  router.push({
+    path: KNOWLEDGE_ROUTES.documentTrace,
+    query: { documentId: row.id },
+  });
+}
+
+function viewVersions(row: KnowledgeDocument) {
+  if (row.id) router.push(knowledgeVersionRoute(row.id));
+}
+
+function viewConflicts(row: KnowledgeDocument) {
+  if (row.id) router.push(knowledgeConflictRoute(row.id));
 }
 
 function buildActions(row: KnowledgeDocument): ActionItem[] {
   const actions: ActionItem[] = [];
   if (row.parseStatus === 'REVIEW') {
-    actions.push({ label: '去审核', type: 'link', icon: ACTION_ICON.AUDIT, onClick: () => goReview(row) });
+    actions.push({
+      label: '去审核',
+      type: 'link',
+      icon: ACTION_ICON.AUDIT,
+      onClick: () => goReview(row),
+    });
   }
   if (row.parseStatus === 'FAILED') {
-    actions.push({ label: '重新处理', type: 'link', icon: ACTION_ICON.REFRESH, onClick: () => handleRetry(row) });
-  }
-  actions.push({ label: '处理链路', type: 'link', icon: ACTION_ICON.VIEW, onClick: () => viewTrace(row) });
-  if (row.parseStatus === 'INDEXED' || row.parseStatus === 'PUBLISHED') {
-    actions.push({ label: '高级信息', type: 'link', onClick: () => openAdvanced(row) });
+    actions.push({
+      label: '重新处理',
+      type: 'link',
+      icon: ACTION_ICON.REFRESH,
+      onClick: () => handleRetry(row),
+    });
   }
   actions.push({
-    label: '删除', icon: ACTION_ICON.DELETE, danger: true,
-    popConfirm: { title: `确认删除文档「${row.name}」吗？相关检索数据也会被清理。`, confirm: () => handleDelete(row) },
+    label: '版本记录',
+    type: 'link',
+    onClick: () => viewVersions(row),
+  });
+  if (row.parseStatus === 'REVIEW' || row.parseStatus === 'PUBLISHED') {
+    actions.push({
+      label: '冲突裁决',
+      type: 'link',
+      onClick: () => viewConflicts(row),
+    });
+  }
+  actions.push({
+    label: '处理链路',
+    type: 'link',
+    icon: ACTION_ICON.VIEW,
+    onClick: () => viewTrace(row),
+  });
+  if (row.parseStatus === 'INDEXED' || row.parseStatus === 'PUBLISHED') {
+    actions.push({
+      label: '高级信息',
+      type: 'link',
+      onClick: () => openAdvanced(row),
+    });
+  }
+  actions.push({
+    label: '删除',
+    icon: ACTION_ICON.DELETE,
+    danger: true,
+    popConfirm: {
+      title: `确认删除文档「${row.name}」吗？相关检索数据也会被清理。`,
+      confirm: () => handleDelete(row),
+    },
   });
   return actions;
 }
@@ -161,7 +232,13 @@ function pollRowStatus(docId: number) {
         versionNo: doc.versionNo,
         versionStatus: doc.versionStatus,
       });
-      if (ticks > 60 || (doc.parseStatus && ['PUBLISHED', 'FAILED', 'INDEXED', 'REVIEW'].includes(doc.parseStatus))) {
+      if (
+        ticks > 60 ||
+        (doc.parseStatus &&
+          ['PUBLISHED', 'FAILED', 'INDEXED', 'REVIEW'].includes(
+            doc.parseStatus,
+          ))
+      ) {
         stopRowPolling();
       }
     } catch {
@@ -177,11 +254,17 @@ function stopRowPolling() {
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: { schema: useGridFormSchema() as VbenFormSchema[] },
   gridOptions: {
-    columns: useGridColumns(), height: 'auto', keepSource: true,
+    columns: useGridColumns(),
+    height: 'auto',
+    keepSource: true,
     proxyConfig: {
       ajax: {
         query: async ({ page }, formValues) => {
-          const data = await getDocumentPage({ pageNo: page.currentPage, pageSize: page.pageSize, ...formValues });
+          const data = await getDocumentPage({
+            pageNo: page.currentPage,
+            pageSize: page.pageSize,
+            ...formValues,
+          });
           for (const d of data.list ?? []) rowsById.set(d.id!, d);
           return data;
         },
@@ -213,25 +296,66 @@ onBeforeUnmount(stopRowPolling);
     title="文档管理"
     description="上传资料后由系统自动完成解析、领域抽取、知识构建和索引；需要人工确认的资料进入审核发布。"
   >
-    <Alert class="mb-3" type="info" show-icon message="默认使用领域最佳处理策略，无需手工选择切分算法。Chunk、Embedding 等工程信息已下沉到“高级信息/处理链路”。" />
+    <Alert
+      class="mb-3"
+      type="info"
+      show-icon
+      message="默认使用领域最佳处理策略，无需手工选择切分算法。Chunk、Embedding 等工程信息已下沉到“高级信息/处理链路”。"
+    />
     <Grid table-title="文档">
       <template #toolbar-tools>
-        <Upload :show-upload-list="false" :before-upload="handleUploadFile" :multiple="false">
+        <Upload
+          :show-upload-list="false"
+          :before-upload="handleUploadFile"
+          :multiple="false"
+        >
           <Button type="primary" :icon="ACTION_ICON.UPLOAD">上传资料</Button>
         </Upload>
       </template>
       <template #name="{ row }">
-        <a-tooltip title="查看原始文件"><a class="text-blue-500 hover:underline" @click="downloadDocument(row)">{{ row.name }}</a></a-tooltip>
+        <a-tooltip title="查看原始文件"
+          ><a
+            class="text-blue-500 hover:underline"
+            @click="downloadDocument(row)"
+            >{{ row.name }}</a
+          ></a-tooltip
+        >
       </template>
-      <template #type="{ row }"><Tag>{{ row.type }}</Tag></template>
+      <template #type="{ row }"
+        ><Tag>{{ row.type }}</Tag></template
+      >
       <template #status="{ row }">
-        <Tag :color="(row.parseStatus && STATUS_TAG[row.parseStatus]?.color) || 'default'">{{ (row.parseStatus && STATUS_TAG[row.parseStatus]?.text) || row.parseStatus }}</Tag>
-        <a-tooltip v-if="row.parseStatus === 'FAILED' && row.errorMsg" :title="row.errorMsg"><span class="ml-1 cursor-help text-xs text-red-500">ⓘ</span></a-tooltip>
+        <Tag
+          :color="
+            (row.parseStatus && STATUS_TAG[row.parseStatus]?.color) || 'default'
+          "
+          >{{
+            (row.parseStatus && STATUS_TAG[row.parseStatus]?.text) ||
+            row.parseStatus
+          }}</Tag
+        >
+        <a-tooltip
+          v-if="row.parseStatus === 'FAILED' && row.errorMsg"
+          :title="row.errorMsg"
+          ><span class="ml-1 cursor-help text-xs text-red-500"
+            >ⓘ</span
+          ></a-tooltip
+        >
       </template>
-      <template #chunkCount="{ row }"><span>{{ row.chunkCount ?? '-' }}</span></template>
-      <template #versionNo="{ row }"><span>{{ row.versionNo || '-' }}</span></template>
-      <template #operation="{ row }"><TableAction :actions="buildActions(row)" /></template>
+      <template #chunkCount="{ row }"
+        ><span>{{ row.chunkCount ?? '-' }}</span></template
+      >
+      <template #versionNo="{ row }"
+        ><span>{{ row.versionNo || '-' }}</span></template
+      >
+      <template #operation="{ row }"
+        ><TableAction :actions="buildActions(row)"
+      /></template>
     </Grid>
-    <ChunkModal v-model:open="chunkModalOpen" :document-id="currentDocumentId" @success="handleRefresh" />
+    <ChunkModal
+      v-model:open="chunkModalOpen"
+      :document-id="currentDocumentId"
+      @success="handleRefresh"
+    />
   </Page>
 </template>

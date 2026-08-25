@@ -5,11 +5,13 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
+import { PanelRight } from '@vben/icons';
 
 import {
   Alert,
   Button,
   Card,
+  Drawer,
   Input,
   message,
   Progress,
@@ -33,8 +35,6 @@ const route = useRoute();
 const query = ref('');
 const kbIds = ref<number[]>([]);
 const loading = ref(false);
-const replayLoading = ref(false);
-const evaluateMode = ref<AiEvidenceApi.EvaluateMode>('AGENT_V1');
 
 const evidenceResult = ref<AiEvidenceApi.EvaluateResp | null>(null);
 const replayStages = ref<AiEvidenceApi.StageTiming[]>([]);
@@ -161,6 +161,36 @@ async function loadReplayTrace(showError = true) {
   }
 }
 
+const STAGE_TEXT: Record<string, string> = {
+  ANALYZE: '理解问题',
+  REWRITE: '查询改写',
+  SPLIT: '问题拆解',
+  SCOPE_FILTER: '范围过滤',
+  BM25: '关键词检索',
+  VECTOR: '语义检索',
+  FUSION: '结果融合',
+  RERANK: '相关性重排',
+  EVIDENCE: '证据构建',
+  GENERATE: '生成回答',
+  VERIFY: '答案验证',
+};
+
+function stageText(stage?: string | null) {
+  return stage ? STAGE_TEXT[stage] || stage : '未命名阶段';
+}
+
+function stageColor(stage: AiEvidenceApi.StageTiming) {
+  if (stage.skipped || stage.status === 'SKIPPED') return 'default';
+  if (stage.status === 'FAILED' || stage.status === 'REJECTED') return 'error';
+  if (stage.status === 'CLARIFY') return 'warning';
+  if (stage.status === 'RUNNING') return 'processing';
+  return 'success';
+}
+
+function openTraceDrawer() {
+  traceDrawerOpen.value = true;
+}
+
 async function handleSearch() {
   const keyword = query.value.trim();
   if (!keyword) {
@@ -173,6 +203,7 @@ async function handleSearch() {
   }
 
   loading.value = true;
+  traceDrawerOpen.value = false;
   evidenceResult.value = null;
   replayStages.value = [];
   expandedEvidence.value = new Set();
@@ -274,19 +305,35 @@ function renderAnswer(answer?: string): string {
 
       <div
         v-if="evidenceResult"
-        class="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4"
+        class="flex flex-col gap-4 rounded-lg border border-border bg-muted/30 p-4"
       >
         <div class="flex flex-wrap items-center gap-2">
+          <div>
+            <div class="text-sm font-semibold">本次查询</div>
+            <div class="mt-1 max-w-3xl text-sm text-muted-foreground">
+              {{ evidenceResult.query }}
+            </div>
+          </div>
+          <Button class="ml-auto" size="small" @click="openTraceDrawer">
+            <template #icon><PanelRight class="size-4" /></template>
+            查看执行回放
+          </Button>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <span class="text-muted-foreground">主路由</span>
           <span class="text-sm font-semibold">执行总览</span>
           <Tag color="geekblue">测试入口：{{ evaluateMode }}</Tag>
           <span class="text-sm text-muted-foreground">主路由:</span>
           <Tag color="blue">{{ evidenceResult.route || 'UNKNOWN' }}</Tag>
-          <span class="text-sm text-muted-foreground">执行模式:</span>
-          <Tag color="purple">{{ evidenceResult.executionMode || 'DEFAULT_RAG' }}</Tag>
-          <span class="text-sm text-muted-foreground">意图:</span>
+          <span class="ml-2 text-muted-foreground">执行模式</span>
+          <Tag color="purple">{{
+            evidenceResult.executionMode || 'DEFAULT_RAG'
+          }}</Tag>
+          <span class="ml-2 text-muted-foreground">意图</span>
           <Tag v-if="intent" :color="intent.color">{{ intent.text }}</Tag>
           <Tag v-else color="default">未识别/不依赖 Intent</Tag>
-          <span class="ml-auto text-xs text-muted-foreground">
+          <span class="ml-2 text-muted-foreground">
             总耗时 {{ evidenceResult.elapsedMs ?? '-' }} ms
           </span>
         </div>
@@ -313,15 +360,83 @@ function renderAnswer(answer?: string): string {
           <Tag v-if="evidenceResult.reasonCode" color="warning">
             reason={{ evidenceResult.reasonCode }}
           </Tag>
+        <div
+          class="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground"
+        >
           <span v-if="evidenceResult.channels">
-            BM25 {{ evidenceResult.channels.bm25 ?? 0 }} /
-            向量 {{ evidenceResult.channels.vector ?? 0 }} /
-            融合 {{ evidenceResult.channels.fused ?? 0 }}
+            BM25 {{ evidenceResult.channels.bm25 ?? 0 }} / 向量
+            {{ evidenceResult.channels.vector ?? 0 }} / 融合
+            {{ evidenceResult.channels.fused ?? 0 }}
           </span>
           <span v-if="evidenceResult.analysis?.entities?.length">
             实体：{{ evidenceResult.analysis.entities.join('、') }}
           </span>
         </div>
+
+        <div v-if="evidenceResult.stages?.length" class="overflow-x-auto pb-1">
+          <div class="flex min-w-[720px] items-stretch gap-2">
+            <template
+              v-for="(stage, index) in evidenceResult.stages"
+              :key="`${stage.seq ?? index}-${stage.stage}`"
+            >
+              <button
+                type="button"
+                class="flex min-w-[112px] flex-1 cursor-pointer flex-col justify-between rounded-md border bg-background/80 px-3 py-2 text-left transition-colors hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/20"
+                :class="[
+                  stage.status === 'FAILED' || stage.status === 'REJECTED'
+                    ? 'border-red-300'
+                    : stage.skipped || stage.status === 'SKIPPED'
+                      ? 'border-dashed border-border opacity-65'
+                      : 'border-border',
+                ]"
+                @click="openTraceDrawer"
+              >
+                <div class="flex items-start justify-between gap-2">
+                  <span class="text-xs font-semibold">{{
+                    stageText(stage.stage)
+                  }}</span>
+                  <Tag
+                    :color="stageColor(stage)"
+                    class="!mr-0 !text-[10px] !leading-4"
+                  >
+                    {{ stage.status || '-' }}
+                  </Tag>
+                </div>
+                <span class="mt-2 text-[11px] text-muted-foreground">
+                  {{ stage.elapsedMs ?? 0 }} ms
+                </span>
+              </button>
+              <span
+                v-if="index < evidenceResult.stages.length - 1"
+                class="self-center text-muted-foreground"
+                >→</span
+              >
+            </template>
+          </div>
+        </div>
+        <div v-else class="text-xs text-muted-foreground">暂无阶段摘要</div>
+      </div>
+
+      <Drawer
+        v-model:open="traceDrawerOpen"
+        title="查询执行回放"
+        width="min(680px, 92vw)"
+        placement="right"
+      >
+        <div v-if="evidenceResult" class="flex flex-col gap-4">
+          <div
+            class="rounded-md border border-border bg-muted/30 p-3 text-sm leading-6"
+          >
+            <div><b>查询：</b>{{ evidenceResult.query }}</div>
+            <div
+              class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+            >
+              <span
+                >Trace ID：<span class="font-mono">{{
+                  evidenceResult.traceId || '-'
+                }}</span></span
+              >
+              <span>总耗时：{{ evidenceResult.elapsedMs ?? '-' }} ms</span>
 
         <div
           v-if="evidenceResult.structuredResult"
@@ -346,11 +461,16 @@ function renderAnswer(answer?: string): string {
             </div>
             <Tag color="blue">{{ responseStageCount }} steps</Tag>
           </div>
-        </template>
-        <QueryExecutionInspector :stages="evidenceResult.stages" />
-      </Card>
+          <QueryExecutionInspector
+            :stages="evidenceResult.stages"
+            :default-expanded="false"
+          />
+        </div>
+      </Drawer>
 
-      <Card v-if="evidenceResult?.traceId" size="small" class="border-border">
+      <Card
+        v-if="
+          evidenceResult ?.traceId" size="small" class="border-border">
         <template #title>
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -389,7 +509,9 @@ function renderAnswer(answer?: string): string {
         </template>
 
         <div class="flex flex-col gap-3">
-          <div class="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3">
+          <div
+            class="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3"
+          >
             <div class="flex flex-wrap items-center gap-2">
               <span class="text-sm font-medium">充分性判定</span>
               <Tag v-if="evidenceResult.answerable" color="success">可作答</Tag>
@@ -402,7 +524,12 @@ function renderAnswer(answer?: string): string {
               </span>
               <Progress
                 class="flex-1"
-                :percent="Math.min(100, Math.max(0, Math.round(evidenceResult.confidence * 100)))"
+                :percent="
+                  Math.min(
+                    100,
+                    Math.max(0, Math.round(evidenceResult.confidence * 100)),
+                  )
+                "
                 size="small"
                 :status="evidenceResult.answerable ? 'normal' : 'exception'"
               />
@@ -424,14 +551,18 @@ function renderAnswer(answer?: string): string {
             <template #description>
               <div class="flex flex-col gap-1">
                 <div v-for="(conflict, index) in evidenceResult.conflicts" :key="index" class="text-sm">
-                  证据 #{{ conflict.evidenceIndexA }} ↔ #{{ conflict.evidenceIndexB }}:
+                  证据 #{{ conflict.evidenceIndexA }} ↔ #{{
+                    conflict.evidenceIndexB
+                  }}:
                   {{ conflict.reason }}
                 </div>
               </div>
             </template>
           </Alert>
 
-          <template v-if="evidenceResult.claims && evidenceResult.claims.length > 0">
+          <template
+            v-if="evidenceResult.claims && evidenceResult.claims.length > 0"
+          >
             <Alert
               v-if="evidenceResult.claimFail"
               type="error"
@@ -447,7 +578,9 @@ function renderAnswer(answer?: string): string {
               <Tag :color="claim.verdict === 'SUPPORTED' ? 'success' : 'error'" class="shrink-0">
                 {{ claim.verdict === 'SUPPORTED' ? '✓ 支持' : '✗ 不支持' }}
               </Tag>
-              <span class="flex-1 break-all text-sm leading-6 text-card-foreground">{{ claim.text }}</span>
+              <span
+                class="flex-1 break-all text-sm leading-6 text-card-foreground"
+              >{{ claim.text }}</span>
               <span class="shrink-0 rounded bg-blue-500/15 px-1.5 py-0.5 font-mono text-xs text-blue-600 dark:text-blue-400">
                 → 证据[#{{ claim.evidenceIndex }}]
               </span>
@@ -476,27 +609,41 @@ function renderAnswer(answer?: string): string {
               v-for="(item, index) in evidenceResult.evidence"
               :key="evidenceKey(item, index)"
               size="small"
-              :class="conflictIndexes.has(index) ? 'border-red-500/60' : 'border-border'"
+              :class="
+                conflictIndexes.has(index)
+                  ? 'border-red-500/60'
+                  : 'border-border'
+              "
             >
               <template #title>
                 <div class="flex flex-wrap items-center gap-2">
                   <Tag :color="item.evidenceType === 'STRUCTURED_RESULT' ? 'purple' : 'blue'">
                     {{ item.evidenceType || 'CHUNK' }}
                   </Tag>
-                  <span v-if="item.chunkId != null" class="font-mono text-sm">#{{ item.chunkId }}</span>
-                  <span class="font-medium">{{ item.documentName || (item.documentId ? `documentId=${item.documentId}` : '确定性结构化结果') }}</span>
-                  <Tag v-if="item.versionNo" color="default">{{ item.versionNo }}</Tag>
-                  <span class="ml-auto text-sm text-muted-foreground">得分 {{ formatScore(item.score) }}</span>
+                  <span v-if="item.chunkId != null"class="font-mono text-sm">#{{ item.chunkId }}</span>
+                  <span class="font-medium">{{
+                    item.documentName || (item.documentId ? `documentId=${item.documentId}` : '确定性结构化结果')
+                  }}</span>
+                  <Tag v-if="item.versionNo" color="default">{{
+                    item.versionNo
+                  }}</Tag>
+                  <span class="ml-auto text-sm text-muted-foreground">
+                    得分 {{ formatScore(item.score) }}
+                  </span>
                 </div>
               </template>
               <div class="flex flex-col gap-2">
                 <div
                   class="whitespace-pre-wrap break-all text-sm leading-6"
-                  :class="item.chunkId != null && !expandedEvidence.has(item.chunkId) ? 'line-clamp-3' : ''"
+                  :class="
+                    item.chunkId != null && !expandedEvidence.has(item.chunkId) ? 'line-clamp-3'
+                  : ''"
                 >
                   {{ item.content }}
                 </div>
-                <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <div
+                  class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+                >
                   <span>证据索引 #{{ index }}</span>
                   <span v-if="item.applicationNo">申请号 {{ item.applicationNo }}</span>
                   <span v-if="item.publicationNo">公布号 {{ item.publicationNo }}</span>

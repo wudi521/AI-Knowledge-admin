@@ -1,13 +1,27 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { message } from 'ant-design-vue';
+
+import { Page } from '@vben/common-ui';
+
+import {
+  Button,
+  Empty,
+  Modal,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Timeline,
+  message,
+} from 'ant-design-vue';
 import {
   getOpsJobs,
   getOpsJobDetail,
   retryOpsIngest,
   type OpsApi,
 } from '#/api/ai/ops';
+import { KNOWLEDGE_ROUTES } from '../knowledge-routes';
 
 const router = useRouter();
 const jobs = ref<OpsApi.Job[]>([]);
@@ -75,7 +89,10 @@ async function showDetail(jobId: number) {
 
 function viewDocument(documentId?: number) {
   if (!documentId) return;
-  router.push({ path: '/kb/ops/document-trace', query: { documentId } });
+  router.push({
+    path: KNOWLEDGE_ROUTES.documentTrace,
+    query: { documentId },
+  });
 }
 
 async function retryJob(record: OpsApi.Job) {
@@ -139,42 +156,62 @@ onMounted(load);
         },
       }"
     >
-      <TableColumn title="任务" width="100">
+      <Table.Column title="任务" width="100">
         <template #default="{ record }">#{{ record.id }}</template>
-      </TableColumn>
-      <TableColumn title="文档" width="110">
+      </Table.Column>
+      <Table.Column title="文档" width="110">
         <template #default="{ record }">
-          <a v-if="record.documentId" @click="viewDocument(record.documentId)">#{{ record.documentId }}</a>
+          <a v-if="record.documentId" @click="viewDocument(record.documentId)"
+            >#{{ record.documentId }}</a
+          >
           <span v-else>-</span>
         </template>
-      </TableColumn>
-      <TableColumn title="领域" width="90">
-        <template #default="{ record }">{{ record.domainCode === 'PATENT' ? '专利' : record.domainCode || '通用' }}</template>
-      </TableColumn>
-      <TableColumn title="当前阶段" width="130">
+      </Table.Column>
+      <Table.Column title="领域" width="90">
+        <template #default="{ record }">{{
+          record.domainCode === 'PATENT' ? '专利' : record.domainCode || '通用'
+        }}</template>
+      </Table.Column>
+      <Table.Column title="当前阶段" width="130">
         <template #default="{ record }">{{ stageText(record.stage) }}</template>
-      </TableColumn>
-      <TableColumn title="状态" width="110">
+      </Table.Column>
+      <Table.Column title="状态" width="110">
         <template #default="{ record }">
-          <Tag :color="record.status === 'SUCCEEDED' ? 'green' : record.status === 'FAILED' ? 'red' : record.status === 'RUNNING' ? 'blue' : 'default'">
+          <Tag
+            :color="
+              record.status === 'SUCCEEDED'
+                ? 'green'
+                : record.status === 'FAILED'
+                  ? 'red'
+                  : record.status === 'RUNNING'
+                    ? 'blue'
+                    : 'default'
+            "
+          >
             {{ statusText(record.status) }}
           </Tag>
         </template>
-      </TableColumn>
-      <TableColumn title="已重试" data-index="retryCount" width="80" />
-      <TableColumn title="失败原因" data-index="errorMessage" ellipsis>
+      </Table.Column>
+      <Table.Column title="已重试" data-index="retryCount" width="80" />
+      <Table.Column title="失败原因" data-index="errorMessage" ellipsis>
         <template #default="{ record }">
-          <span :class="record.status === 'FAILED' ? 'ops-error' : ''">{{ record.errorMessage || '-' }}</span>
+          <span :class="record.status === 'FAILED' ? 'ops-error' : ''">{{
+            record.errorMessage || '-'
+          }}</span>
         </template>
-      </TableColumn>
-      <TableColumn title="开始时间" width="170">
-        <template #default="{ record }">{{ fmtTime(record.startedAt) }}</template>
-      </TableColumn>
-      <TableColumn title="操作" width="220" fixed="right">
+      </Table.Column>
+      <Table.Column title="开始时间" width="170">
+        <template #default="{ record }">{{
+          fmtTime(record.startedAt)
+        }}</template>
+      </Table.Column>
+      <Table.Column title="操作" width="220" fixed="right">
         <template #default="{ record }">
           <Space>
             <a @click="showDetail(record.id)">执行详情</a>
-            <a v-if="record.documentId" @click="viewDocument(record.documentId)">文档链路</a>
+            <a v-if="record.documentId" @click="viewDocument(record.documentId)"
+              >文档链路</a
+            >
             <Button
               v-if="record.status === 'FAILED' && record.documentId"
               type="link"
@@ -187,44 +224,78 @@ onMounted(load);
             </Button>
           </Space>
         </template>
-      </TableColumn>
+      </Table.Column>
     </Table>
 
-    <Modal v-model:open="detailOpen" title="任务执行详情" :footer="null" :width="720" :destroy-on-close="true">
+    <Modal
+      v-model:open="detailOpen"
+      title="任务执行详情"
+      :footer="null"
+      :width="720"
+      :destroy-on-close="true"
+    >
       <template v-if="detail">
         <div class="ops-detail-head">
           任务 #{{ detail.jobId }} · {{ statusText(detail.status) }}
           <span v-if="detail.stage"> · {{ stageText(detail.stage) }}</span>
-          <span v-if="detail.errorMessage" class="ops-error"> · {{ detail.errorMessage }}</span>
+          <span v-if="detail.errorMessage" class="ops-error">
+            · {{ detail.errorMessage }}</span
+          >
         </div>
         <Timeline v-if="detail.tasks && detail.tasks.length">
-          <TimelineItem
+          <Timeline.Item
             v-for="(t, i) in detail.tasks"
             :key="i"
-            :color="t.status === 'SUCCEEDED' ? 'green' : t.status === 'FAILED' ? 'red' : 'blue'"
+            :color="
+              t.status === 'SUCCEEDED'
+                ? 'green'
+                : t.status === 'FAILED'
+                  ? 'red'
+                  : 'blue'
+            "
           >
             <div class="ops-stage">
               <b>{{ stageText(t.stageCode) }}</b>
               <span class="ops-stage-meta">
-                {{ statusText(t.status) }} · {{ fmtTime(t.startedAt) }} ~ {{ fmtTime(t.finishedAt) }}
+                {{ statusText(t.status) }} · {{ fmtTime(t.startedAt) }} ~
+                {{ fmtTime(t.finishedAt) }}
               </span>
-              <div v-if="t.errorMessage" class="ops-error">{{ t.errorMessage }}</div>
-              <details v-if="t.metricsJson || t.outputSummaryJson" class="ops-stage-meta mt-1">
+              <div v-if="t.errorMessage" class="ops-error">
+                {{ t.errorMessage }}
+              </div>
+              <details
+                v-if="t.metricsJson || t.outputSummaryJson"
+                class="ops-stage-meta mt-1"
+              >
                 <summary>技术详情</summary>
                 <div v-if="t.metricsJson">{{ t.metricsJson }}</div>
                 <div v-if="t.outputSummaryJson">{{ t.outputSummaryJson }}</div>
               </details>
             </div>
-          </TimelineItem>
+          </Timeline.Item>
         </Timeline>
+        <Empty v-else description="暂无阶段记录" />
       </template>
     </Modal>
   </Page>
 </template>
 
 <style scoped>
-.ops-toolbar { margin-bottom: 12px; display: flex; gap: 8px; }
-.ops-detail-head { margin-bottom: 12px; }
-.ops-stage-meta { margin-left: 8px; color: #8a8a8e; font-size: 12px; }
-.ops-error { color: #ef4444; font-size: 12px; }
+.ops-toolbar {
+  margin-bottom: 12px;
+  display: flex;
+  gap: 8px;
+}
+.ops-detail-head {
+  margin-bottom: 12px;
+}
+.ops-stage-meta {
+  margin-left: 8px;
+  color: #8a8a8e;
+  font-size: 12px;
+}
+.ops-error {
+  color: #ef4444;
+  font-size: 12px;
+}
 </style>
