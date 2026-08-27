@@ -16,10 +16,7 @@ export interface QueryExecutionStage {
   outputSummary?: string | null;
 }
 
-type StageDescriptor = {
-  name: string;
-  purpose: string;
-};
+type StageDescriptor = { name: string; purpose: string };
 
 const props = withDefaults(
   defineProps<{
@@ -32,13 +29,8 @@ const props = withDefaults(
 const expanded = ref<Set<number>>(new Set());
 const initialized = ref(false);
 
-/**
- * 这里必须与后端真实 Trace phase 对齐。
- * Agent Runtime 的 phase 在 AgenticEvidenceFacade 中统一加 AGENT_ 前缀；
- * V3 保留 QueryEngineV3 原始阶段名。
- */
+// 与当前后端真实 Trace phase 对齐：AgenticEvidenceFacade 会给 Runtime phase 加 AGENT_ 前缀。
 const STAGES: Record<string, StageDescriptor> = {
-  // AgenticKnowledgeRuntimeEngine
   AGENT_QUERY_PLANNING: {
     name: '查询规划',
     purpose: '根据原始问题、上下文、已有执行结果和可用能力，决定下一步是执行计划、直接作答、补充信息还是停止。',
@@ -92,80 +84,28 @@ const STAGES: Record<string, StageDescriptor> = {
     purpose: '当前 Agent Runtime 无法继续时，切换到兼容的 V3 检索流程继续处理。',
   },
 
-  // QueryEngineV3
-  ANALYZE: {
-    name: '理解问题',
-    purpose: '分析用户问题，识别检索意图、关键对象和查询约束。',
-  },
-  REWRITE: {
-    name: '查询改写',
-    purpose: '把原始问题改写成更适合知识库检索的查询表达。',
-  },
-  SPLIT: {
-    name: '问题拆解',
-    purpose: '把复杂问题拆成可以分别检索和验证的子问题。',
-  },
-  SCOPE_FILTER: {
-    name: '范围过滤',
-    purpose: '按照知识库、领域、权限和上下文范围过滤可检索内容。',
-  },
-  BM25: {
-    name: '关键词检索',
-    purpose: '使用关键词相关性从知识库中召回候选内容。',
-  },
-  VECTOR: {
-    name: '语义检索',
-    purpose: '使用语义相似度从知识库中召回与问题含义接近的候选内容。',
-  },
-  FUSION: {
-    name: '检索结果融合',
-    purpose: '合并不同检索通道的候选结果并去重。',
-  },
-  RERANK: {
-    name: '相关性重排',
-    purpose: '重新判断候选内容与问题的相关性，并把最有价值的结果排到前面。',
-  },
-  EVIDENCE: {
-    name: '证据构建',
-    purpose: '从候选结果中整理能够支持最终答案的证据。',
-  },
-  GENERATE: {
-    name: '答案生成',
-    purpose: '基于已经取得的证据生成候选答案。',
-  },
-  VERIFY: {
-    name: '答案验证',
-    purpose: '检查候选答案中的结论是否能够被返回证据支持。',
-  },
+  // V3 查询引擎的真实阶段。
+  ANALYZE: { name: '理解问题', purpose: '分析用户问题，识别检索意图、关键对象和查询约束。' },
+  REWRITE: { name: '查询改写', purpose: '把原始问题改写成更适合知识库检索的查询表达。' },
+  SPLIT: { name: '问题拆解', purpose: '把复杂问题拆成可以分别检索和验证的子问题。' },
+  SCOPE_FILTER: { name: '范围过滤', purpose: '按照知识库、领域、权限和上下文范围过滤可检索内容。' },
+  BM25: { name: '关键词检索', purpose: '使用关键词相关性从知识库中召回候选内容。' },
+  VECTOR: { name: '语义检索', purpose: '使用语义相似度从知识库中召回与问题含义接近的候选内容。' },
+  FUSION: { name: '检索结果融合', purpose: '合并不同检索通道的候选结果并去重。' },
+  RERANK: { name: '相关性重排', purpose: '重新判断候选内容与问题的相关性，并把最有价值的结果排到前面。' },
+  EVIDENCE: { name: '证据构建', purpose: '从候选结果中整理能够支持最终答案的证据。' },
+  GENERATE: { name: '答案生成', purpose: '基于已经取得的证据生成候选答案。' },
+  VERIFY: { name: '答案验证', purpose: '检查候选答案中的结论是否能够被返回证据支持。' },
 };
 
 const COMPLETED_STATUS = new Set([
-  'SUCCEEDED',
-  'SUCCESS',
-  'PARTIAL',
-  'EMPTY',
-  'REPLAN',
-  'SKIPPED',
-  'CLARIFY',
+  'SUCCEEDED', 'SUCCESS', 'PARTIAL', 'EMPTY', 'REPLAN', 'SKIPPED', 'CLARIFY',
 ]);
-
 const RUNNING_STATUS = new Set([
-  'RUNNING',
-  'IN_PROGRESS',
-  'PROCESSING',
-  'STARTED',
-  'PENDING',
+  'RUNNING', 'IN_PROGRESS', 'PROCESSING', 'STARTED', 'PENDING',
 ]);
-
 const FAILED_STATUS = new Set([
-  'FAILED',
-  'FAILURE',
-  'ERROR',
-  'REJECTED',
-  'TIMEOUT',
-  'TIMED_OUT',
-  'CANCELLED',
-  'CANCELED',
+  'FAILED', 'FAILURE', 'ERROR', 'REJECTED', 'TIMEOUT', 'TIMED_OUT', 'CANCELLED', 'CANCELED',
 ]);
 
 const normalizedStages = computed(() => {
@@ -188,7 +128,7 @@ function toggle(index: number) {
   expanded.value = next;
 }
 
-function descriptor(stage: QueryExecutionStage): StageDescriptor | null {
+function descriptor(stage: QueryExecutionStage) {
   return STAGES[normalizeCode(stage.stage)] || null;
 }
 
@@ -196,7 +136,7 @@ function stageText(stage: QueryExecutionStage) {
   const item = descriptor(stage);
   if (item) return item.name;
   const code = normalizeCode(stage.stage);
-  // 不再用“其他执行阶段”掩盖前后端阶段不一致。
+  // 未知阶段必须暴露真实阶段码，不能再用“其他执行阶段”糊过去。
   return code ? `未映射阶段：${code}` : '未映射阶段：阶段码为空';
 }
 
@@ -204,7 +144,7 @@ function stagePurpose(stage: QueryExecutionStage) {
   const item = descriptor(stage);
   if (item) return item.purpose;
   const code = normalizeCode(stage.stage);
-  return `前端尚未配置阶段 ${code || '（空阶段码）'} 的中文说明，请按原始阶段码检查后端 Trace 定义。`;
+  return `前端尚未配置阶段 ${code || '（空阶段码）'} 的中文说明，请按真实阶段码检查后端 Trace 定义。`;
 }
 
 function statusText(stage: QueryExecutionStage) {
@@ -215,7 +155,6 @@ function statusText(stage: QueryExecutionStage) {
     return normalizeCode(stage.errorCode) === 'NEED_USER_INPUT' ? '已完成' : '失败';
   }
   if (COMPLETED_STATUS.has(status) || stage.skipped) return '已完成';
-  // 当前后端实际状态已全部映射；若以后新增，直接暴露状态码，避免误判为成功。
   return status ? `未映射状态：${status}` : '未映射状态：空';
 }
 
@@ -278,16 +217,10 @@ function translatedOutput(stage: QueryExecutionStage) {
   if (code === 'AGENT_PLAN_VALIDATION' && raw === 'schema/DAG validation passed') {
     return '执行计划的参数结构和节点依赖关系校验通过。';
   }
-  if (
-    code === 'AGENT_RESULT_INTEGRITY' &&
-    raw === 'node results and activity records are consistent'
-  ) {
+  if (code === 'AGENT_RESULT_INTEGRITY' && raw === 'node results and activity records are consistent') {
     return '执行节点结果与活动记录一致，结果完整性校验通过。';
   }
-  if (
-    code === 'AGENT_PROVENANCE_INTEGRITY' &&
-    raw === 'every ReferenceRecord is linked to provenance'
-  ) {
+  if (code === 'AGENT_PROVENANCE_INTEGRITY' && raw === 'every ReferenceRecord is linked to provenance') {
     return '每条引用证据都已关联对应来源记录，证据来源链校验通过。';
   }
 
@@ -372,9 +305,7 @@ function failureReason(stage: QueryExecutionStage) {
   const code = stage.errorCode?.trim();
   if (message && code) return `${message}（原因码：${code}）`;
   if (message) return message;
-  if (isFailure(stage) && output) {
-    return code ? `${output}（原因码：${code}）` : output;
-  }
+  if (output) return code ? `${output}（原因码：${code}）` : output;
   if (code) return `原因码：${code}`;
   return '后端没有记录更具体的失败原因。';
 }
@@ -382,9 +313,7 @@ function failureReason(stage: QueryExecutionStage) {
 function planningRound(index: number) {
   let round = 0;
   for (let i = 0; i <= index; i += 1) {
-    if (normalizeCode(normalizedStages.value[i]?.stage) === 'AGENT_QUERY_PLANNING') {
-      round += 1;
-    }
+    if (normalizeCode(normalizedStages.value[i]?.stage) === 'AGENT_QUERY_PLANNING') round += 1;
   }
   return round;
 }
@@ -450,10 +379,7 @@ function retryProcess(index: number) {
           <span class="qe-summary-label">本步产生了什么结果：</span>
           <span class="qe-summary-value">{{ resultText(stage) }}</span>
         </div>
-        <div
-          v-if="isFailure(stage) || stage.errorCode || stage.errorMessage"
-          class="qe-summary-row qe-error-row"
-        >
+        <div v-if="isFailure(stage)" class="qe-summary-row qe-error-row">
           <span class="qe-summary-label">失败原因：</span>
           <span>{{ failureReason(stage) }}</span>
         </div>
@@ -485,13 +411,7 @@ function retryProcess(index: number) {
           <code>{{ stage.status }}</code>
         </div>
         <div
-          v-if="
-            !stage.inputSummary &&
-            !stage.outputSummary &&
-            !stage.modelCallId &&
-            !stage.errorMessage &&
-            !stage.errorCode
-          "
+          v-if="!stage.inputSummary && !stage.outputSummary && !stage.modelCallId && !stage.errorMessage && !stage.errorCode"
           class="qe-empty-detail"
         >
           当前步骤没有更多诊断明细。
@@ -503,163 +423,37 @@ function retryProcess(index: number) {
 </template>
 
 <style scoped>
-.qe-inspector {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.qe-stage {
-  overflow: hidden;
-  border: 1px solid #e5e7eb;
-  border-radius: 9px;
-  background: #fff;
-}
-:global(html.dark) .qe-stage {
-  border-color: #353a45;
-  background: #1f232b;
-}
-.qe-stage-failed {
-  border-color: #fca5a5;
-}
-.qe-stage-skipped {
-  opacity: 0.78;
-}
-.qe-stage-head {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 8px;
-  border: 0;
-  padding: 10px 12px;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.qe-stage-head:hover {
-  background: #f8fafc;
-}
-:global(html.dark) .qe-stage-head:hover {
-  background: #292e38;
-}
-.qe-toggle {
-  width: 14px;
-  color: #94a3b8;
-}
-.qe-stage-name {
-  min-width: 0;
-  flex: 1;
-  font-size: 13px;
-  font-weight: 650;
-}
-.qe-stage-ms {
-  min-width: 96px;
-  color: #64748b;
-  font-size: 12px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.qe-stage-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  border-top: 1px solid #eef2f7;
-  padding: 10px 12px 11px 34px;
-  color: #4b5563;
-  font-size: 12px;
-  line-height: 1.65;
-}
-:global(html.dark) .qe-stage-summary {
-  border-top-color: #343a46;
-  color: #d1d5db;
-}
-.qe-summary-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-}
-.qe-summary-label {
-  flex: 0 0 auto;
-  color: #374151;
-  font-weight: 650;
-}
-:global(html.dark) .qe-summary-label {
-  color: #e5e7eb;
-}
-.qe-summary-value {
-  min-width: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.qe-error-row {
-  color: #b91c1c;
-}
-:global(html.dark) .qe-error-row {
-  color: #fca5a5;
-}
-.qe-retry-row {
-  color: #b45309;
-}
-:global(html.dark) .qe-retry-row {
-  color: #fbbf24;
-}
-.qe-stage-body {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  border-top: 1px dashed #e5e7eb;
-  padding: 10px 12px 12px 34px;
-}
-:global(html.dark) .qe-stage-body {
-  border-top-color: #343a46;
-}
-.qe-block {
-  border-left: 3px solid #93c5fd;
-  border-radius: 4px;
-  padding: 7px 9px;
-  background: #f8fbff;
-}
-.qe-output {
-  border-left-color: #86efac;
-  background: #f7fdf9;
-}
-:global(html.dark) .qe-block {
-  background: #192331;
-}
-:global(html.dark) .qe-output {
-  background: #19271f;
-}
-.qe-label {
-  margin-bottom: 5px;
-  color: #64748b;
-  font-size: 11px;
-  font-weight: 600;
-}
-.qe-block pre {
-  margin: 0;
-  overflow-wrap: anywhere;
-  color: #1f2937;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.65;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-:global(html.dark) .qe-block pre {
-  color: #e5e7eb;
-}
-.qe-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #64748b;
-  font-size: 11px;
-}
-.qe-meta code {
-  overflow-wrap: anywhere;
-}
-.qe-empty-detail {
-  color: #94a3b8;
-  font-size: 11px;
-}
+.qe-inspector { display: flex; flex-direction: column; gap: 10px; }
+.qe-stage { overflow: hidden; border: 1px solid #e5e7eb; border-radius: 9px; background: #fff; }
+:global(html.dark) .qe-stage { border-color: #353a45; background: #1f232b; }
+.qe-stage-failed { border-color: #fca5a5; }
+.qe-stage-skipped { opacity: 0.78; }
+.qe-stage-head { display: flex; width: 100%; align-items: center; gap: 8px; border: 0; padding: 10px 12px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.qe-stage-head:hover { background: #f8fafc; }
+:global(html.dark) .qe-stage-head:hover { background: #292e38; }
+.qe-toggle { width: 14px; color: #94a3b8; }
+.qe-stage-name { min-width: 0; flex: 1; font-size: 13px; font-weight: 650; }
+.qe-stage-ms { min-width: 96px; color: #64748b; font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.qe-stage-summary { display: flex; flex-direction: column; gap: 7px; border-top: 1px solid #eef2f7; padding: 10px 12px 11px 34px; color: #4b5563; font-size: 12px; line-height: 1.65; }
+:global(html.dark) .qe-stage-summary { border-top-color: #343a46; color: #d1d5db; }
+.qe-summary-row { display: flex; align-items: flex-start; gap: 4px; }
+.qe-summary-label { flex: 0 0 auto; color: #374151; font-weight: 650; }
+:global(html.dark) .qe-summary-label { color: #e5e7eb; }
+.qe-summary-value { min-width: 0; white-space: pre-wrap; word-break: break-word; }
+.qe-error-row { color: #b91c1c; }
+:global(html.dark) .qe-error-row { color: #fca5a5; }
+.qe-retry-row { color: #b45309; }
+:global(html.dark) .qe-retry-row { color: #fbbf24; }
+.qe-stage-body { display: flex; flex-direction: column; gap: 9px; border-top: 1px dashed #e5e7eb; padding: 10px 12px 12px 34px; }
+:global(html.dark) .qe-stage-body { border-top-color: #343a46; }
+.qe-block { border-left: 3px solid #93c5fd; border-radius: 4px; padding: 7px 9px; background: #f8fbff; }
+.qe-output { border-left-color: #86efac; background: #f7fdf9; }
+:global(html.dark) .qe-block { background: #192331; }
+:global(html.dark) .qe-output { background: #19271f; }
+.qe-label { margin-bottom: 5px; color: #64748b; font-size: 11px; font-weight: 600; }
+.qe-block pre { margin: 0; overflow-wrap: anywhere; color: #1f2937; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
+:global(html.dark) .qe-block pre { color: #e5e7eb; }
+.qe-meta { display: flex; align-items: center; gap: 8px; color: #64748b; font-size: 11px; }
+.qe-meta code { overflow-wrap: anywhere; }
+.qe-empty-detail { color: #94a3b8; font-size: 11px; }
 </style>
