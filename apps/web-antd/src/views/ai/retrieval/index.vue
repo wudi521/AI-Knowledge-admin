@@ -193,16 +193,59 @@ function stageColor(stage: AiEvidenceApi.StageTiming) {
   return 'success';
 }
 
+function statusLabel(status?: null | string) {
+  const value = status?.toUpperCase();
+  if (
+    value === 'FAILED' ||
+    value === 'FAILURE' ||
+    value === 'ERROR' ||
+    value === 'REJECTED' ||
+    value === 'TIMEOUT' ||
+    value === 'TIMED_OUT'
+  ) {
+    return '失败';
+  }
+  if (
+    value === 'RUNNING' ||
+    value === 'IN_PROGRESS' ||
+    value === 'PROCESSING' ||
+    value === 'STARTED' ||
+    value === 'PENDING'
+  ) {
+    return '进行中';
+  }
+  return '已完成';
+}
+
 function stageLabel(stage?: null | string) {
   const names: Record<string, string> = {
+    QUERY_CONTEXT: '查询上下文',
     PLANNER: '任务规划',
+    PLAN: '任务规划',
+    PLAN_VALIDATE: '计划校验',
+    PLAN_VALIDATION: '计划校验',
+    CAPABILITY_DISCOVERY: '能力识别',
     CAPABILITY_PREPARE: '能力准备',
     CAPABILITY: '能力执行',
-    TRUSTED_SCOPE: '可信范围',
+    TOOL_EXECUTION: '工具执行',
+    EXECUTION: '计划执行',
+    TRUSTED_SCOPE: '可信范围校验',
     GUARD: '执行保护',
-    ANSWER: '答案生成',
-    STOP: '停止',
-    AGENT_FALLBACK_TO_V3: '回退 V3',
+    ANSWER: '最终结果评估与作答',
+    EVALUATE: '最终结果评估',
+    RESULT_EVALUATION: '最终结果评估',
+    FINAL_EVALUATION: '最终结果评估',
+    ANSWER_VALIDATION: '答案校验',
+    CLAIM_VERIFY: '答案校验',
+    EVIDENCE_RECORD: '证据记录',
+    PROVENANCE: '证据来源记录',
+    REPLAN: '重新规划',
+    REPLANNING: '重新规划',
+    RETRY: '重新执行',
+    RETRY_PLAN: '重新规划',
+    PLAN_RETRY: '重新规划',
+    STOP: '执行结束',
+    AGENT_FALLBACK_TO_V3: '兼容流程降级',
     ANALYZE: '理解问题',
     REWRITE: '查询改写',
     SPLIT: '问题拆解',
@@ -211,11 +254,11 @@ function stageLabel(stage?: null | string) {
     VECTOR: '语义检索',
     FUSION: '结果融合',
     RERANK: '相关性重排',
-    EVIDENCE: '证据构建',
-    GENERATE: '生成回答',
-    VERIFY: '答案验证',
+    EVIDENCE: '证据记录',
+    GENERATE: '答案生成',
+    VERIFY: '答案校验',
   };
-  return stage ? names[stage] || stage : '未知阶段';
+  return stage ? names[stage] || '其他执行阶段' : '未知阶段';
 }
 
 function escapeHtml(text: string) {
@@ -396,24 +439,24 @@ async function handleSearch() {
             <div class="metric-label">可作答</div>
             <div class="metric-value">
               <Tag :color="statusTone">
-                {{ evidenceResult.answerable ? 'YES' : 'NO' }}
+                {{ evidenceResult.answerable ? '可以作答' : '暂不能作答' }}
               </Tag>
             </div>
             <div class="metric-sub">
-              {{ evidenceResult.reasonCode || '无 reasonCode' }}
+              {{ evidenceResult.reasonCode || '暂无原因码' }}
             </div>
           </Card>
 
           <Card class="overview-card" :bordered="false">
             <div class="metric-label">主路由</div>
-            <div class="metric-main">{{ evidenceResult.route || 'UNKNOWN' }}</div>
-            <div class="metric-sub">{{ evidenceResult.executionMode || 'DEFAULT' }}</div>
+            <div class="metric-main">{{ evidenceResult.route || '未知路由' }}</div>
+            <div class="metric-sub">{{ evidenceResult.executionMode || '默认模式' }}</div>
           </Card>
 
           <Card class="overview-card" :bordered="false">
             <div class="metric-label">执行步骤</div>
             <div class="metric-main">{{ responseStageCount }}</div>
-            <div class="metric-sub">{{ evidenceResult.elapsedMs ?? '-' }} ms</div>
+            <div class="metric-sub">总耗时 {{ evidenceResult.elapsedMs ?? '-' }} ms</div>
           </Card>
 
           <Card class="overview-card" :bordered="false">
@@ -478,19 +521,19 @@ async function handleSearch() {
 
           <div class="status-strip">
             <Tag :color="modeColor">{{ evaluateMode }}</Tag>
-            <Tag color="blue">route={{ evidenceResult.route || 'UNKNOWN' }}</Tag>
+            <Tag color="blue">路由：{{ evidenceResult.route || '未知' }}</Tag>
             <Tag color="purple">
-              mode={{ evidenceResult.executionMode || 'DEFAULT' }}
+              执行模式：{{ evidenceResult.executionMode || '默认' }}
             </Tag>
             <Tag v-if="evidenceResult.reasonCode" color="warning">
-              reason={{ evidenceResult.reasonCode }}
+              原因码：{{ evidenceResult.reasonCode }}
             </Tag>
             <Tag v-if="evidenceResult.confidence == null" color="default">
-              confidence=null
+              置信度：暂无
             </Tag>
-            <Tag v-if="evidenceResult.timedOut" color="error">timedOut</Tag>
+            <Tag v-if="evidenceResult.timedOut" color="error">执行超时</Tag>
             <Tag v-if="evidenceResult.verificationDegraded" color="warning">
-              verificationDegraded
+              答案校验已降级
             </Tag>
           </div>
 
@@ -501,19 +544,19 @@ async function handleSearch() {
             <div class="result-caption">结构化结果</div>
             <div class="structured-grid">
               <div>
-                <span>queryType</span>
+                <span>查询类型</span>
                 <b>{{ evidenceResult.structuredResult.queryType || '-' }}</b>
               </div>
               <div>
-                <span>operation</span>
+                <span>执行操作</span>
                 <b>{{ evidenceResult.structuredResult.operation || '-' }}</b>
               </div>
               <div>
-                <span>entityCount</span>
+                <span>实体数量</span>
                 <b>{{ evidenceResult.structuredResult.entityCount ?? '-' }}</b>
               </div>
               <div>
-                <span>fieldCode</span>
+                <span>字段编码</span>
                 <b>{{ evidenceResult.structuredResult.fieldCode || '-' }}</b>
               </div>
             </div>
@@ -521,7 +564,7 @@ async function handleSearch() {
               v-if="evidenceResult.structuredResult.entityIds?.length"
               class="structured-ids"
             >
-              entityIds：{{ evidenceResult.structuredResult.entityIds.join(', ') }}
+              实体 ID：{{ evidenceResult.structuredResult.entityIds.join(', ') }}
             </div>
           </div>
         </Card>
@@ -536,10 +579,10 @@ async function handleSearch() {
               <div>
                 <div class="section-title">执行链路</div>
                 <div class="section-subtitle">
-                  点击任一步骤可以在右侧抽屉查看完整输入、输出与错误信息
+                  每个节点展示第几步、中文阶段、执行状态和耗时；详细过程可在完整 Trace 中查看
                 </div>
               </div>
-              <Tag color="blue">{{ responseStageCount }} steps</Tag>
+              <Tag color="blue">共 {{ responseStageCount }} 步</Tag>
             </div>
           </template>
 
@@ -558,13 +601,13 @@ async function handleSearch() {
               @click="traceDrawerOpen = true"
             >
               <div class="stage-node-top">
-                <span class="stage-index">{{ stage.seq ?? index + 1 }}</span>
+                <span class="stage-index">第 {{ stage.seq ?? index + 1 }} 步</span>
                 <Tag :color="stageColor(stage)">
-                  {{ stage.status || '-' }}
+                  {{ statusLabel(stage.status) }}
                 </Tag>
               </div>
               <div class="stage-name">{{ stageLabel(stage.stage) }}</div>
-              <div class="stage-time">{{ stage.elapsedMs ?? 0 }} ms</div>
+              <div class="stage-time">耗时 {{ stage.elapsedMs ?? 0 }} ms</div>
             </button>
           </div>
         </Card>
@@ -573,13 +616,13 @@ async function handleSearch() {
           <template #title>
             <div class="section-title-row">
               <div>
-                <div class="section-title">证据与验证</div>
+                <div class="section-title">证据与答案校验</div>
                 <div class="section-subtitle">
-                  结构化结果与文档片段统一展示；Claim 结果与证据索引保持对应
+                  展示最终答案是否通过校验、每条结论引用了哪些证据，以及证据的来源和内容
                 </div>
               </div>
               <Tag color="cyan">
-                {{ (evidenceResult.evidence || []).length }} evidences
+                共 {{ (evidenceResult.evidence || []).length }} 条证据
               </Tag>
             </div>
           </template>
@@ -596,17 +639,17 @@ async function handleSearch() {
             v-if="evidenceResult.claims?.length"
             class="claims-panel"
           >
-            <div class="result-caption">Claim 验证</div>
+            <div class="result-caption">答案校验结果</div>
             <div
               v-for="(claim, index) in evidenceResult.claims"
               :key="`${index}-${claim.text}`"
               class="claim-row"
             >
               <Tag :color="claim.verdict === 'SUPPORTED' ? 'success' : 'error'">
-                {{ claim.verdict }}
+                {{ claim.verdict === 'SUPPORTED' ? '证据支持' : '未通过校验' }}
               </Tag>
               <span class="claim-text">{{ claim.text }}</span>
-              <span class="claim-index">证据 #{{ claim.evidenceIndex }}</span>
+              <span class="claim-index">引用证据 #{{ claim.evidenceIndex }}</span>
             </div>
           </div>
 
@@ -629,18 +672,18 @@ async function handleSearch() {
                   </div>
                 </div>
                 <div class="evidence-score">
-                  score {{ formatScore(item.score) }}
+                  相关度 {{ formatScore(item.score) }}
                 </div>
               </div>
 
               <div class="evidence-meta">
-                <span v-if="item.documentId">doc={{ item.documentId }}</span>
-                <span v-if="item.chunkId">chunk={{ item.chunkId }}</span>
+                <span v-if="item.documentId">文档 ID={{ item.documentId }}</span>
+                <span v-if="item.chunkId">切片 ID={{ item.chunkId }}</span>
                 <span v-if="item.applicationNo">申请号 {{ item.applicationNo }}</span>
                 <span v-if="item.publicationNo">公布号 {{ item.publicationNo }}</span>
-                <span v-if="item.metric">metric={{ item.metric }}</span>
+                <span v-if="item.metric">指标={{ item.metric }}</span>
                 <span v-if="item.aggregateValue != null">
-                  value={{ item.aggregateValue }}
+                  聚合值={{ item.aggregateValue }}
                 </span>
               </div>
 
@@ -689,15 +732,15 @@ async function handleSearch() {
               <div>
                 <div class="section-title">复制给开发排查</div>
                 <div class="section-subtitle">
-                  直接复制这两份 JSON 发给我，不需要再打开浏览器 Network
+                  需要排查底层字段时再复制原始 JSON；日常查看请优先使用上方中文执行过程
                 </div>
               </div>
               <div class="debug-actions">
                 <Button size="small" @click="copyText(responseJson, '响应 JSON 已复制')">
                   复制响应 JSON
                 </Button>
-                <Button size="small" @click="copyText(replayJson, 'Trace JSON 已复制')">
-                  复制 Trace JSON
+                <Button size="small" @click="copyText(replayJson, '回放 JSON 已复制')">
+                  复制回放 JSON
                 </Button>
               </div>
             </div>
@@ -705,663 +748,496 @@ async function handleSearch() {
 
           <div class="debug-grid">
             <div>
-              <div class="result-caption">evaluate 完整响应</div>
-              <pre>{{ responseJson }}</pre>
+              <div class="result-caption">响应 JSON</div>
+              <pre class="debug-json">{{ responseJson }}</pre>
             </div>
             <div>
-              <div class="result-caption">持久化 Trace 回放</div>
-              <pre>{{ replayJson }}</pre>
+              <div class="result-caption">Trace 回放 JSON</div>
+              <pre class="debug-json">{{ replayJson }}</pre>
             </div>
           </div>
         </Card>
       </template>
 
-      <Drawer
-        v-model:open="traceDrawerOpen"
-        title="查询执行回放"
-        width="min(760px, 94vw)"
-        placement="right"
-      >
-        <template v-if="evidenceResult">
-          <div class="trace-drawer-head">
-            <div>
-              <div class="result-caption">原始问题</div>
-              <div class="trace-query">{{ evidenceResult.query }}</div>
-            </div>
-            <div class="trace-meta">
-              <Tag :color="modeColor">{{ evaluateMode }}</Tag>
-              <span>{{ evidenceResult.elapsedMs ?? '-' }} ms</span>
-            </div>
-          </div>
-
-          <div class="trace-id-row">
-            <span class="result-caption">Trace ID</span>
-            <code>{{ evidenceResult.traceId || '-' }}</code>
-          </div>
-
-          <div class="trace-section">
-            <div class="trace-section-head">
-              <div>
-                <div class="section-title">本次响应 Trace</div>
-                <div class="section-subtitle">
-                  接口当次返回的 Planner → Capability → Guard → Answer/Stop
-                </div>
-              </div>
-              <Tag color="blue">{{ responseStageCount }} steps</Tag>
-            </div>
-            <QueryExecutionInspector
-              :stages="evidenceResult.stages"
-              :default-expanded="false"
-            />
-          </div>
-
-          <div class="trace-section">
-            <div class="trace-section-head">
-              <div>
-                <div class="section-title">数据库持久化回放</div>
-                <div class="section-subtitle">
-                  从 ai_query_trace_stage 按 traceId 重新读取，验证刷新后仍可复盘
-                </div>
-              </div>
-              <div class="trace-actions">
-                <Tag
-                  v-if="replayConsistent !== null"
-                  :color="replayConsistent ? 'success' : 'error'"
-                >
-                  {{ replayConsistent ? '与响应一致' : '与响应不一致' }}
-                </Tag>
-                <Button
-                  size="small"
-                  :loading="replayLoading"
-                  @click="loadReplayTrace(true)"
-                >
-                  重新读取
-                </Button>
-              </div>
-            </div>
-
-            <QueryExecutionInspector
-              v-if="replayStages.length"
-              :stages="replayStages"
-              :default-expanded="false"
-            />
-            <Alert
-              v-else
-              type="warning"
-              show-icon
-              message="暂未读取到持久化 Trace"
-              description="如果 Agent 已成功执行，请确认 sql/migrate-20260825-agent-v11-trace.sql 已执行。"
-            />
-          </div>
-        </template>
-      </Drawer>
+      <div v-else class="empty-state">
+        <div class="empty-title">先执行一条测试问题</div>
+        <div class="empty-description">
+          运行后会显示最终答案、执行链路、证据和完整中文 Trace。
+        </div>
+      </div>
     </div>
+
+    <Drawer
+      v-model:open="traceDrawerOpen"
+      title="完整执行 Trace"
+      placement="right"
+      :width="720"
+    >
+      <div v-if="evidenceResult" class="trace-drawer">
+        <div class="trace-section">
+          <div class="trace-section-head">
+            <div>
+              <div class="section-title">本次响应 Trace</div>
+              <div class="section-subtitle">
+                按执行顺序查看：第几步、中文阶段、状态、耗时、本步目标、本步结果、失败原因、重试过程，以及最终评估、答案校验和证据记录
+              </div>
+            </div>
+            <Tag color="blue">共 {{ responseStageCount }} 步</Tag>
+          </div>
+          <QueryExecutionInspector
+            :stages="evidenceResult.stages"
+            :default-expanded="false"
+          />
+        </div>
+
+        <div class="trace-section">
+          <div class="trace-section-head">
+            <div>
+              <div class="section-title">数据库持久化 Trace</div>
+              <div class="section-subtitle">
+                用于核对本次响应与数据库记录是否一致，展示方式与本次响应相同
+              </div>
+            </div>
+            <Button size="small" :loading="replayLoading" @click="loadReplayTrace(true)">
+              刷新回放
+            </Button>
+          </div>
+          <QueryExecutionInspector
+            :stages="replayStages"
+            :default-expanded="false"
+          />
+        </div>
+      </div>
+    </Drawer>
   </Page>
 </template>
 
 <style scoped>
 .regression-page {
   display: flex;
-  min-height: 100%;
   flex-direction: column;
   gap: 16px;
-  padding: 20px;
-  background:
-    radial-gradient(circle at 8% 0%, rgb(91 112 255 / 8%), transparent 28%),
-    var(--el-bg-color-page, transparent);
+  padding: 18px;
 }
-
 .hero-panel {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 24px;
-  padding: 6px 2px 2px;
+  gap: 20px;
+  border-radius: 16px;
+  padding: 22px 24px;
+  background:
+    radial-gradient(circle at top right, rgb(99 102 241 / 18%), transparent 35%),
+    linear-gradient(135deg, #111827, #1f2937);
+  color: white;
 }
-
 .hero-eyebrow {
-  margin-bottom: 6px;
-  color: #6366f1;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
+  margin-bottom: 7px;
+  color: #a5b4fc;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
 }
-
 .hero-title {
   margin: 0;
-  color: var(--foreground);
-  font-size: 24px;
-  font-weight: 760;
-  letter-spacing: -0.025em;
+  font-size: 26px;
+  font-weight: 750;
 }
-
 .hero-description {
-  max-width: 820px;
-  margin: 8px 0 0;
-  color: #64748b;
-  font-size: 13px;
+  max-width: 780px;
+  margin: 9px 0 0;
+  color: #d1d5db;
   line-height: 1.7;
 }
-
 .hero-status {
   display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 8px;
-  padding-top: 4px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
 }
-
 .hero-status-text {
-  color: #94a3b8;
+  color: #9ca3af;
   font-size: 12px;
 }
-
 .control-card,
 .result-card,
 .overview-card {
-  overflow: hidden;
-  border: 1px solid rgb(148 163 184 / 18%);
-  box-shadow: 0 1px 2px rgb(15 23 42 / 3%);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 6%);
 }
-
 .control-grid {
   display: grid;
-  grid-template-columns: 220px 240px minmax(320px, 1fr) auto;
+  grid-template-columns: 220px 260px minmax(280px, 1fr) auto;
   gap: 14px;
   align-items: end;
 }
-
 .control-field {
   min-width: 0;
 }
-
-.control-query {
-  min-width: 320px;
-}
-
-.control-action {
-  display: flex;
-  align-items: end;
-}
-
-.field-label,
-.result-caption,
-.metric-label {
+.field-label {
   margin-bottom: 7px;
   color: #64748b;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
+  font-size: 12px;
+  font-weight: 650;
 }
-
 .quick-cases {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid rgb(148 163 184 / 14%);
+  margin-top: 14px;
 }
-
 .quick-label {
-  margin-right: 2px;
   color: #64748b;
   font-size: 12px;
+  font-weight: 650;
 }
-
-.quick-case {
-  border-radius: 8px;
-}
-
 .quick-code {
-  display: inline-flex;
-  width: 18px;
-  height: 18px;
-  align-items: center;
-  justify-content: center;
-  margin-right: 4px;
-  border-radius: 5px;
-  background: rgb(99 102 241 / 10%);
-  color: #4f46e5;
-  font-size: 10px;
-  font-weight: 800;
+  margin-right: 5px;
+  color: #6366f1;
+  font-weight: 750;
 }
-
 .overview-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
-
-.overview-card :deep(.ant-card-body) {
-  min-height: 118px;
-  padding: 17px 18px;
+.metric-label {
+  color: #64748b;
+  font-size: 12px;
 }
-
-.metric-value {
-  margin-top: 13px;
-}
-
-.metric-main {
-  overflow: hidden;
-  margin-top: 10px;
-  color: var(--foreground);
-  font-size: 18px;
-  font-weight: 750;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+.metric-value,
+.metric-main,
 .metric-trace {
-  overflow: hidden;
-  margin-top: 10px;
-  color: var(--foreground);
+  margin-top: 8px;
+}
+.metric-main {
+  color: #111827;
+  font-size: 20px;
+  font-weight: 750;
+}
+.metric-trace {
+  overflow-wrap: anywhere;
+  color: #111827;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-
 .metric-sub {
-  overflow: hidden;
-  margin-top: 8px;
+  margin-top: 7px;
   color: #94a3b8;
   font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-
 .section-title-row,
 .trace-section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
 }
-
 .section-title {
-  color: var(--foreground);
-  font-size: 14px;
+  color: #111827;
+  font-size: 15px;
   font-weight: 750;
 }
-
 .section-subtitle {
   margin-top: 3px;
   color: #94a3b8;
   font-size: 11px;
   font-weight: 400;
 }
-
-.result-question {
-  padding: 14px 16px;
-  border: 1px solid rgb(148 163 184 / 16%);
+.result-question,
+.answer-panel,
+.structured-panel {
   border-radius: 10px;
-  background: rgb(148 163 184 / 5%);
+  padding: 14px;
+  background: #f8fafc;
 }
-
-.result-question-text,
-.trace-query {
-  color: var(--foreground);
-  font-size: 14px;
-  font-weight: 650;
+.result-question-text {
+  margin-top: 7px;
+  color: #111827;
+  font-size: 15px;
   line-height: 1.7;
 }
-
 .answer-panel {
-  margin-top: 14px;
-  padding: 16px;
-  border: 1px solid rgb(59 130 246 / 22%);
-  border-radius: 10px;
-  background: linear-gradient(135deg, rgb(59 130 246 / 6%), rgb(99 102 241 / 4%));
+  margin-top: 12px;
+  background: #f7fdf9;
 }
-
 .answer-content {
-  color: var(--foreground);
-  font-size: 14px;
+  margin-top: 7px;
+  color: #1f2937;
   line-height: 1.85;
   white-space: pre-wrap;
-  word-break: break-word;
 }
-
-:deep(.citation-chip) {
-  display: inline-flex;
-  align-items: center;
-  margin: 0 2px;
-  padding: 0 5px;
-  border-radius: 5px;
-  background: rgb(59 130 246 / 12%);
-  color: #2563eb;
-  font-size: 11px;
-  font-weight: 750;
-}
-
 .status-strip {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
-  margin-top: 14px;
+  margin-top: 13px;
 }
-
 .structured-panel {
-  margin-top: 14px;
-  padding: 14px 16px;
-  border: 1px solid rgb(99 102 241 / 18%);
-  border-radius: 10px;
-  background: rgb(99 102 241 / 4%);
+  margin-top: 12px;
 }
-
 .structured-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
+  margin-top: 9px;
 }
-
 .structured-grid > div {
   display: flex;
-  min-width: 0;
   flex-direction: column;
   gap: 4px;
 }
-
-.structured-grid span {
-  color: #94a3b8;
-  font-size: 10px;
-}
-
-.structured-grid b {
-  overflow: hidden;
-  color: var(--foreground);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.structured-ids,
-.evidence-filters {
-  margin-top: 10px;
-  padding: 8px 10px;
-  border-radius: 7px;
-  background: rgb(15 23 42 / 4%);
+.structured-grid span,
+.structured-ids {
   color: #64748b;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
-  line-height: 1.55;
-  word-break: break-all;
 }
-
+.structured-grid b {
+  color: #111827;
+  font-size: 13px;
+}
+.structured-ids {
+  margin-top: 10px;
+}
 .stage-flow {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
-
 .stage-node {
   min-width: 0;
-  border: 1px solid rgb(148 163 184 / 18%);
+  border: 1px solid #e5e7eb;
   border-radius: 10px;
-  padding: 11px 12px;
-  background: rgb(255 255 255 / 55%);
+  padding: 11px;
+  background: white;
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: 160ms ease;
 }
-
 .stage-node:hover {
-  border-color: rgb(99 102 241 / 42%);
-  box-shadow: 0 5px 18px rgb(99 102 241 / 8%);
-  transform: translateY(-1px);
+  border-color: #a5b4fc;
+  background: #f8fafc;
 }
-
 .stage-node-error {
-  border-color: rgb(239 68 68 / 40%);
+  border-color: #fca5a5;
 }
-
 .stage-node-skipped {
-  opacity: 0.58;
+  opacity: 0.68;
 }
-
-.stage-node-top,
-.evidence-head,
-.evidence-footer,
-.trace-drawer-head,
-.trace-meta,
-.trace-actions {
+.stage-node-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
 }
-
 .stage-index {
-  display: inline-flex;
-  width: 22px;
-  height: 22px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  background: rgb(99 102 241 / 9%);
-  color: #6366f1;
-  font-size: 10px;
-  font-weight: 800;
+  color: #94a3b8;
+  font-size: 11px;
 }
-
 .stage-name {
-  overflow: hidden;
-  margin-top: 11px;
-  color: var(--foreground);
-  font-size: 12px;
-  font-weight: 720;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin-top: 8px;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 700;
 }
-
 .stage-time {
   margin-top: 5px;
-  color: #94a3b8;
-  font-size: 10px;
+  color: #64748b;
+  font-size: 11px;
 }
-
 .claims-panel {
-  margin-bottom: 16px;
-  padding: 13px;
-  border: 1px solid rgb(148 163 184 / 16%);
-  border-radius: 10px;
+  margin-bottom: 14px;
 }
-
 .claim-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: start;
-  padding: 9px 0;
-  border-bottom: 1px solid rgb(148 163 184 / 10%);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border-bottom: 1px solid #f1f5f9;
+  padding: 8px 0;
 }
-
-.claim-row:last-child {
-  border-bottom: 0;
-}
-
 .claim-text {
-  color: var(--foreground);
-  font-size: 12px;
+  min-width: 0;
+  flex: 1;
+  color: #374151;
   line-height: 1.65;
 }
-
 .claim-index {
+  flex: 0 0 auto;
   color: #94a3b8;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-size: 11px;
 }
-
 .evidence-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
-
 .evidence-item {
-  padding: 14px 15px;
-  border: 1px solid rgb(148 163 184 / 16%);
-  border-radius: 11px;
-  background: rgb(148 163 184 / 3%);
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 12px;
+  background: white;
 }
-
 .evidence-conflict {
-  border-color: rgb(239 68 68 / 38%);
-  background: rgb(239 68 68 / 3%);
+  border-color: #fca5a5;
+  background: #fff7f7;
 }
-
-.evidence-title-wrap {
+.evidence-head,
+.evidence-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.evidence-title-wrap,
+.channel-list {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
 }
-
 .evidence-title {
   overflow: hidden;
-  color: var(--foreground);
-  font-size: 13px;
+  color: #111827;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .evidence-score {
-  flex-shrink: 0;
-  color: #94a3b8;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 11px;
 }
-
 .evidence-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 9px;
+  margin-top: 8px;
   color: #94a3b8;
-  font-size: 10px;
+  font-size: 11px;
 }
-
 .evidence-content {
-  margin-top: 11px;
-  color: var(--foreground);
-  font-size: 12px;
+  margin-top: 10px;
+  color: #374151;
   line-height: 1.75;
   white-space: pre-wrap;
-  word-break: break-word;
 }
-
 .evidence-content-collapsed {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
 }
-
+.evidence-filters {
+  margin-top: 8px;
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: #f8fafc;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
 .evidence-footer {
-  margin-top: 10px;
+  margin-top: 9px;
 }
-
-.channel-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.empty-evidence {
-  padding: 34px;
+.empty-evidence,
+.empty-state {
   color: #94a3b8;
-  font-size: 12px;
   text-align: center;
 }
-
+.empty-state {
+  border: 1px dashed #dbe4ef;
+  border-radius: 14px;
+  padding: 48px 20px;
+  background: #fff;
+}
+.empty-title {
+  color: #475569;
+  font-size: 16px;
+  font-weight: 700;
+}
+.empty-description {
+  margin-top: 7px;
+  font-size: 12px;
+}
 .debug-actions {
   display: flex;
   gap: 8px;
 }
-
 .debug-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
-
-.debug-grid pre {
-  max-height: 360px;
-  margin: 0;
+.debug-json {
+  max-height: 340px;
+  margin: 7px 0 0;
   overflow: auto;
-  border: 1px solid rgb(148 163 184 / 14%);
-  border-radius: 9px;
-  padding: 12px;
+  border-radius: 8px;
+  padding: 10px;
   background: #0f172a;
   color: #cbd5e1;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
-  line-height: 1.6;
+  font-size: 11px;
+  line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
 }
-
-.trace-drawer-head {
-  align-items: flex-start;
-  padding-bottom: 14px;
-  border-bottom: 1px solid rgb(148 163 184 / 14%);
-}
-
-.trace-meta {
-  flex-shrink: 0;
-  color: #94a3b8;
-  font-size: 11px;
-}
-
-.trace-id-row {
+.trace-drawer {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 14px 0 18px;
-  padding: 9px 11px;
-  border-radius: 8px;
-  background: rgb(148 163 184 / 6%);
+  flex-direction: column;
+  gap: 18px;
 }
-
-.trace-id-row .result-caption {
-  margin-bottom: 0;
-}
-
-.trace-id-row code {
-  overflow: hidden;
-  color: #6366f1;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .trace-section {
-  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+:global(.citation-chip) {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 2px;
+  border-radius: 999px;
+  padding: 1px 6px;
+  background: #e0e7ff;
+  color: #4338ca;
+  font-size: 11px;
+  font-weight: 700;
+}
+:global(html.dark) .metric-main,
+:global(html.dark) .metric-trace,
+:global(html.dark) .section-title,
+:global(html.dark) .result-question-text,
+:global(html.dark) .structured-grid b,
+:global(html.dark) .stage-name,
+:global(html.dark) .evidence-title {
+  color: #f3f4f6;
+}
+:global(html.dark) .result-question,
+:global(html.dark) .structured-panel,
+:global(html.dark) .empty-state,
+:global(html.dark) .stage-node,
+:global(html.dark) .evidence-item {
+  border-color: #343a46;
+  background: #1f232b;
+}
+:global(html.dark) .answer-panel {
+  background: #19271f;
+}
+:global(html.dark) .answer-content,
+:global(html.dark) .claim-text,
+:global(html.dark) .evidence-content {
+  color: #d1d5db;
+}
+:global(html.dark) .evidence-filters {
+  background: #292e38;
 }
 
-.trace-section-head {
-  margin-bottom: 12px;
-}
-
-@media (max-width: 1180px) {
+@media (max-width: 1100px) {
   .control-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
   .control-query {
-    min-width: 0;
+    grid-column: 1 / -1;
   }
-
-  .control-action {
-    justify-content: flex-end;
-  }
-
   .overview-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1371,44 +1247,20 @@ async function handleSearch() {
   .regression-page {
     padding: 12px;
   }
-
   .hero-panel,
   .section-title-row,
   .trace-section-head {
+    align-items: flex-start;
     flex-direction: column;
-    align-items: stretch;
   }
-
   .hero-status {
-    padding-top: 0;
+    align-items: flex-start;
   }
-
   .control-grid,
   .overview-grid,
   .structured-grid,
   .debug-grid {
     grid-template-columns: 1fr;
   }
-
-  .control-action :deep(.ant-btn) {
-    width: 100%;
-  }
-
-  .claim-row {
-    grid-template-columns: auto 1fr;
-  }
-
-  .claim-index {
-    grid-column: 2;
-  }
-}
-
-:global(html.dark) .stage-node {
-  background: rgb(15 23 42 / 42%);
-}
-
-:global(html.dark) .structured-ids,
-:global(html.dark) .evidence-filters {
-  background: rgb(255 255 255 / 5%);
 }
 </style>
