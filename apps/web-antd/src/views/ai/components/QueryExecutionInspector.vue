@@ -16,6 +16,11 @@ export interface QueryExecutionStage {
   outputSummary?: string | null;
 }
 
+type StageDescriptor = {
+  name: string;
+  purpose: string;
+};
+
 const props = withDefaults(
   defineProps<{
     stages?: QueryExecutionStage[] | null;
@@ -27,91 +32,130 @@ const props = withDefaults(
 const expanded = ref<Set<number>>(new Set());
 const initialized = ref(false);
 
-const STAGE_TEXT: Record<string, string> = {
-  QUERY_CONTEXT: '查询上下文',
-  ANALYZE: '理解问题',
-  REWRITE: '查询改写',
-  SPLIT: '问题拆解',
-  PLANNER: '任务规划',
-  PLAN: '任务规划',
-  PLAN_VALIDATE: '计划校验',
-  PLAN_VALIDATION: '计划校验',
-  CAPABILITY_DISCOVERY: '能力识别',
-  CAPABILITY_PREPARE: '能力准备',
-  CAPABILITY: '能力执行',
-  TOOL_EXECUTION: '工具执行',
-  EXECUTION: '计划执行',
-  SCOPE_FILTER: '范围过滤',
-  TRUSTED_SCOPE: '可信范围校验',
-  GUARD: '执行保护',
-  BM25: '关键词检索',
-  VECTOR: '语义检索',
-  FUSION: '结果融合',
-  RERANK: '相关性重排',
-  EVIDENCE: '证据记录',
-  EVIDENCE_RECORD: '证据记录',
-  PROVENANCE: '证据来源记录',
-  GENERATE: '答案生成',
-  VERIFY: '答案校验',
-  CLAIM_VERIFY: '答案校验',
-  ANSWER_VALIDATION: '答案校验',
-  VALIDATE: '答案校验',
-  EVALUATE: '最终结果评估',
-  RESULT_EVALUATION: '最终结果评估',
-  FINAL_EVALUATION: '最终结果评估',
-  ANSWER: '最终结果评估与作答',
-  FINALIZE: '结果收尾',
-  REPLAN: '重新规划',
-  REPLANNING: '重新规划',
-  RETRY: '重新执行',
-  RETRY_PLAN: '重新规划',
-  PLAN_RETRY: '重新规划',
-  STOP: '执行结束',
-  AGENT_FALLBACK_TO_V3: '兼容流程降级',
+/**
+ * 这里必须与后端真实 Trace phase 对齐。
+ * Agent Runtime 的 phase 在 AgenticEvidenceFacade 中统一加 AGENT_ 前缀；
+ * V3 保留 QueryEngineV3 原始阶段名。
+ */
+const STAGES: Record<string, StageDescriptor> = {
+  // AgenticKnowledgeRuntimeEngine
+  AGENT_QUERY_PLANNING: {
+    name: '查询规划',
+    purpose: '根据原始问题、上下文、已有执行结果和可用能力，决定下一步是执行计划、直接作答、补充信息还是停止。',
+  },
+  AGENT_EXECUTION_PLAN: {
+    name: '生成执行计划',
+    purpose: '把本轮查询规划转换成可执行计划，明确要调用哪些能力、各节点的依赖关系以及本轮重新规划次数。',
+  },
+  AGENT_PLAN_VALIDATION: {
+    name: '执行计划校验',
+    purpose: '校验执行计划是否绑定原始问题，并检查节点参数、依赖关系和计划结构是否可以安全执行。',
+  },
+  AGENT_NO_PROGRESS_GUARD: {
+    name: '重复执行保护',
+    purpose: '检查重新规划后的执行语义是否与已经证明无效的计划重复，避免反复访问同一数据却没有新进展。',
+  },
+  AGENT_RUNTIME_EXECUTOR: {
+    name: '执行计划节点',
+    purpose: '按执行计划调用真实检索或业务能力，记录每个节点的执行状态、耗时和返回结果。',
+  },
+  AGENT_RESULT_INTEGRITY: {
+    name: '执行结果完整性校验',
+    purpose: '核对每个执行节点的结果和活动记录是否一一对应，防止缺结果、重复结果或状态不一致。',
+  },
+  AGENT_PROVENANCE_INTEGRITY: {
+    name: '证据来源完整性校验',
+    purpose: '检查每条引用证据是否都有对应的来源记录，并确认计划、节点和能力来源能够正确追溯。',
+  },
+  AGENT_RESULT_EVALUATION: {
+    name: '最终结果评估',
+    purpose: '独立判断当前已经取得的事实和证据是否足以完整回答原始问题；不足时触发有限次数的重新规划。',
+  },
+  AGENT_ANSWER_VALIDATION: {
+    name: '答案校验',
+    purpose: '在输出答案前检查答案是否真正回答原始问题，并确认关键结论能够被确定性结果或证据支持。',
+  },
+  AGENT_REFERENCE_RECORD: {
+    name: '引用证据记录',
+    purpose: '记录本次答案实际引用了哪些执行结果、验证实体和证据，建立答案与证据之间的引用关系。',
+  },
+  AGENT_PROVENANCE_RECORD: {
+    name: '证据来源记录',
+    purpose: '记录引用证据来自哪个知识库、领域、执行计划和能力，保证结果可以追溯到真实来源。',
+  },
+  AGENT_STOP: {
+    name: '执行结束',
+    purpose: '结束本次执行，并记录为什么停止、是否需要用户补充信息或为什么当前不能可靠作答。',
+  },
+  AGENT_FALLBACK_TO_V3: {
+    name: '降级到兼容检索流程',
+    purpose: '当前 Agent Runtime 无法继续时，切换到兼容的 V3 检索流程继续处理。',
+  },
+
+  // QueryEngineV3
+  ANALYZE: {
+    name: '理解问题',
+    purpose: '分析用户问题，识别检索意图、关键对象和查询约束。',
+  },
+  REWRITE: {
+    name: '查询改写',
+    purpose: '把原始问题改写成更适合知识库检索的查询表达。',
+  },
+  SPLIT: {
+    name: '问题拆解',
+    purpose: '把复杂问题拆成可以分别检索和验证的子问题。',
+  },
+  SCOPE_FILTER: {
+    name: '范围过滤',
+    purpose: '按照知识库、领域、权限和上下文范围过滤可检索内容。',
+  },
+  BM25: {
+    name: '关键词检索',
+    purpose: '使用关键词相关性从知识库中召回候选内容。',
+  },
+  VECTOR: {
+    name: '语义检索',
+    purpose: '使用语义相似度从知识库中召回与问题含义接近的候选内容。',
+  },
+  FUSION: {
+    name: '检索结果融合',
+    purpose: '合并不同检索通道的候选结果并去重。',
+  },
+  RERANK: {
+    name: '相关性重排',
+    purpose: '重新判断候选内容与问题的相关性，并把最有价值的结果排到前面。',
+  },
+  EVIDENCE: {
+    name: '证据构建',
+    purpose: '从候选结果中整理能够支持最终答案的证据。',
+  },
+  GENERATE: {
+    name: '答案生成',
+    purpose: '基于已经取得的证据生成候选答案。',
+  },
+  VERIFY: {
+    name: '答案验证',
+    purpose: '检查候选答案中的结论是否能够被返回证据支持。',
+  },
 };
 
-const STAGE_PURPOSE: Record<string, string> = {
-  QUERY_CONTEXT: '整理本次查询的上下文、知识库范围和执行约束，为后续规划提供输入。',
-  ANALYZE: '分析用户问题，识别检索意图、关键对象和约束。',
-  REWRITE: '将原始问题改写为更适合知识库检索的查询。',
-  SPLIT: '把复杂问题拆成可以独立检索和验证的子问题。',
-  PLANNER: '理解问题并生成本次检索、计算与回答的执行计划。',
-  PLAN: '理解问题并生成本次检索、计算与回答的执行计划。',
-  PLAN_VALIDATE: '检查执行计划是否完整、可执行，并满足当前约束。',
-  PLAN_VALIDATION: '检查执行计划是否完整、可执行，并满足当前约束。',
-  CAPABILITY_DISCOVERY: '识别本次查询可以调用的检索、工具和业务能力。',
-  CAPABILITY_PREPARE: '准备当前计划需要的能力、工具和执行参数。',
-  CAPABILITY: '按计划调用检索或业务能力，并收集执行结果。',
-  TOOL_EXECUTION: '调用计划指定的工具，并记录工具返回结果。',
-  EXECUTION: '执行已经确认的计划节点，并汇总各节点结果。',
-  SCOPE_FILTER: '按照知识库、权限和范围条件过滤可检索内容。',
-  TRUSTED_SCOPE: '收敛到可信知识范围，过滤不满足范围要求的内容。',
-  GUARD: '检查安全、权限、范围以及当前结果是否可以继续执行。',
-  BM25: '使用关键词相关性检索候选文档或数据。',
-  VECTOR: '使用语义向量相似度检索候选文档或数据。',
-  FUSION: '合并不同检索通道的候选结果并去重。',
-  RERANK: '重新排序候选结果，保留与问题最相关的内容。',
-  EVIDENCE: '整理可用于作答的证据，并记录证据来源和引用关系。',
-  EVIDENCE_RECORD: '整理可用于作答的证据，并记录证据来源和引用关系。',
-  PROVENANCE: '记录结果来自哪些文档、数据或工具，保证答案可以追溯。',
-  GENERATE: '基于已经取得的证据生成候选答案。',
-  VERIFY: '逐项校验答案中的结论是否有证据支持。',
-  CLAIM_VERIFY: '逐项校验答案中的结论是否有证据支持。',
-  ANSWER_VALIDATION: '检查最终答案与证据是否一致，避免无依据回答。',
-  VALIDATE: '检查最终答案与证据是否一致，避免无依据回答。',
-  EVALUATE: '综合检查答案完整性、证据充分性和执行结果，形成最终结果评估。',
-  RESULT_EVALUATION: '综合检查答案完整性、证据充分性和执行结果，形成最终结果评估。',
-  FINAL_EVALUATION: '综合检查答案完整性、证据充分性和执行结果，形成最终结果评估。',
-  ANSWER: '综合执行结果和可信证据，判断是否可以作答并形成最终答案。',
-  FINALIZE: '整理最终状态、答案、证据和校验结果，结束本次执行。',
-  REPLAN: '根据上一次失败原因重新规划执行路径，并准备再次执行。',
-  REPLANNING: '根据上一次失败原因重新规划执行路径，并准备再次执行。',
-  RETRY: '根据失败原因调整执行条件，并重新执行当前步骤。',
-  RETRY_PLAN: '根据上一次失败原因重新规划执行路径，并准备再次执行。',
-  PLAN_RETRY: '根据上一次失败原因重新规划执行路径，并准备再次执行。',
-  STOP: '结束本次执行链路，并记录终止原因和已有结果。',
-  AGENT_FALLBACK_TO_V3: '当前 Agent 链路无法继续时，切换到兼容检索流程完成请求。',
-};
+const COMPLETED_STATUS = new Set([
+  'SUCCEEDED',
+  'SUCCESS',
+  'PARTIAL',
+  'EMPTY',
+  'REPLAN',
+  'SKIPPED',
+  'CLARIFY',
+]);
+
+const RUNNING_STATUS = new Set([
+  'RUNNING',
+  'IN_PROGRESS',
+  'PROCESSING',
+  'STARTED',
+  'PENDING',
+]);
 
 const FAILED_STATUS = new Set([
   'FAILED',
@@ -122,14 +166,6 @@ const FAILED_STATUS = new Set([
   'TIMED_OUT',
   'CANCELLED',
   'CANCELED',
-]);
-
-const RUNNING_STATUS = new Set([
-  'RUNNING',
-  'IN_PROGRESS',
-  'PROCESSING',
-  'STARTED',
-  'PENDING',
 ]);
 
 const normalizedStages = computed(() => {
@@ -152,11 +188,35 @@ function toggle(index: number) {
   expanded.value = next;
 }
 
+function descriptor(stage: QueryExecutionStage): StageDescriptor | null {
+  return STAGES[normalizeCode(stage.stage)] || null;
+}
+
+function stageText(stage: QueryExecutionStage) {
+  const item = descriptor(stage);
+  if (item) return item.name;
+  const code = normalizeCode(stage.stage);
+  // 不再用“其他执行阶段”掩盖前后端阶段不一致。
+  return code ? `未映射阶段：${code}` : '未映射阶段：阶段码为空';
+}
+
+function stagePurpose(stage: QueryExecutionStage) {
+  const item = descriptor(stage);
+  if (item) return item.purpose;
+  const code = normalizeCode(stage.stage);
+  return `前端尚未配置阶段 ${code || '（空阶段码）'} 的中文说明，请按原始阶段码检查后端 Trace 定义。`;
+}
+
 function statusText(stage: QueryExecutionStage) {
   const status = normalizeCode(stage.status);
   if (FAILED_STATUS.has(status)) return '失败';
   if (RUNNING_STATUS.has(status)) return '进行中';
-  return '已完成';
+  if (status === 'STOPPED') {
+    return normalizeCode(stage.errorCode) === 'NEED_USER_INPUT' ? '已完成' : '失败';
+  }
+  if (COMPLETED_STATUS.has(status) || stage.skipped) return '已完成';
+  // 当前后端实际状态已全部映射；若以后新增，直接暴露状态码，避免误判为成功。
+  return status ? `未映射状态：${status}` : '未映射状态：空';
 }
 
 function isFailure(stage: QueryExecutionStage) {
@@ -166,112 +226,197 @@ function isFailure(stage: QueryExecutionStage) {
 function statusColor(stage: QueryExecutionStage) {
   if (isFailure(stage)) return 'error';
   if (statusText(stage) === '进行中') return 'processing';
-  if (stage.skipped || normalizeCode(stage.status) === 'SKIPPED') {
-    return 'default';
-  }
-  if (normalizeCode(stage.status) === 'CLARIFY') return 'warning';
-  return 'success';
-}
-
-function stageText(stage: QueryExecutionStage) {
-  const code = normalizeCode(stage.stage);
-  return STAGE_TEXT[code] || '其他执行阶段';
+  if (statusText(stage) === '已完成') return 'success';
+  return 'warning';
 }
 
 function stageTitle(stage: QueryExecutionStage, index: number) {
   return `第 ${stage.seq ?? index + 1} 步 · ${stageText(stage)}`;
 }
 
-function stagePurpose(stage: QueryExecutionStage) {
+function extractValue(text: string, key: string) {
+  const match = text.match(new RegExp(`(?:^|;)\\s*${key}=([^;]*)`));
+  return match?.[1]?.trim() || '';
+}
+
+function translateVerdict(value: string) {
+  const verdict = normalizeCode(value);
+  if (verdict === 'SATISFIED') return '已经满足原始问题，可以进入答案校验';
+  if (verdict === 'INSUFFICIENT') return '现有结果仍不足，将重新规划后继续执行';
+  if (verdict === 'NEED_MORE_INFO') return '现有信息不足，需要用户补充关键信息';
+  if (verdict === 'EVALUATION_FAILED') return '结果充分性评估失败，不能直接输出答案';
+  return value;
+}
+
+function translateRuntimeStatus(value: string) {
+  const status = normalizeCode(value);
+  if (status === 'SUCCESS' || status === 'SUCCEEDED') return '执行成功';
+  if (status === 'PARTIAL') return '部分完成';
+  if (status === 'EMPTY') return '执行完成，但没有查到结果';
+  if (status === 'FAILED') return '执行失败';
+  return value;
+}
+
+function translatedOutput(stage: QueryExecutionStage) {
   const code = normalizeCode(stage.stage);
-  return (
-    STAGE_PURPOSE[code] ||
-    '执行当前计划中的处理步骤，并将处理结果传递给后续阶段。'
-  );
+  const raw = stage.outputSummary?.trim() || '';
+
+  if (code === 'AGENT_EXECUTION_PLAN') {
+    const planId = extractValue(raw, 'planId');
+    const nodes = extractValue(raw, 'nodes');
+    const replanAttempt = extractValue(raw, 'replanAttempt');
+    if (planId || nodes || replanAttempt) {
+      const parts = [
+        planId ? `计划编号 ${planId}` : '',
+        nodes ? `共 ${nodes} 个执行节点` : '',
+        replanAttempt ? `当前已重新规划 ${replanAttempt} 次` : '',
+      ].filter(Boolean);
+      return `执行计划已生成：${parts.join('，')}。`;
+    }
+  }
+
+  if (code === 'AGENT_PLAN_VALIDATION' && raw === 'schema/DAG validation passed') {
+    return '执行计划的参数结构和节点依赖关系校验通过。';
+  }
+  if (
+    code === 'AGENT_RESULT_INTEGRITY' &&
+    raw === 'node results and activity records are consistent'
+  ) {
+    return '执行节点结果与活动记录一致，结果完整性校验通过。';
+  }
+  if (
+    code === 'AGENT_PROVENANCE_INTEGRITY' &&
+    raw === 'every ReferenceRecord is linked to provenance'
+  ) {
+    return '每条引用证据都已关联对应来源记录，证据来源链校验通过。';
+  }
+
+  if (code === 'AGENT_RESULT_EVALUATION') {
+    const verdict = extractValue(raw, 'verdict');
+    const reason = raw.includes(';') ? raw.slice(raw.indexOf(';') + 1).trim() : '';
+    if (verdict) {
+      return `评估结论：${translateVerdict(verdict)}${reason ? `。评估依据：${reason}` : '。'}`;
+    }
+  }
+
+  if (code === 'AGENT_ANSWER_VALIDATION') {
+    if (raw === 'deterministic references satisfy immutable OriginalGoal') {
+      return '确定性执行结果已经完整回答原始问题，答案校验通过。';
+    }
+    if (raw === 'answer failed claim/evidence validation') {
+      return '最终答案没有通过结论与证据一致性校验。';
+    }
+    if (raw === 'immutable OriginalGoal passed goal evaluation + claim/evidence validation') {
+      return '最终答案已通过目标充分性评估和结论/证据一致性校验。';
+    }
+  }
+
+  if (code === 'AGENT_RUNTIME_EXECUTOR') {
+    const runtimeStatus = extractValue(raw, 'status');
+    const failureType = extractValue(raw, 'failureType');
+    const detail = raw.includes(';') ? raw.slice(raw.lastIndexOf(';') + 1).trim() : '';
+    if (runtimeStatus) {
+      const parts = [`节点${translateRuntimeStatus(runtimeStatus)}`];
+      if (failureType) parts.push(`失败类型：${failureType}`);
+      if (detail && !detail.startsWith('status=')) parts.push(`结果：${detail}`);
+      return parts.join('；');
+    }
+  }
+
+  if (code === 'AGENT_REFERENCE_RECORD') {
+    const referenceId = extractValue(raw, 'referenceId');
+    const entityIds = extractValue(raw, 'verifiedEntityIds');
+    const evidenceCount = extractValue(raw, 'evidenceCount');
+    const deterministic = extractValue(raw, 'deterministic');
+    const parts = [
+      referenceId ? `引用记录 ${referenceId}` : '',
+      entityIds ? `已验证实体 ${entityIds}` : '',
+      evidenceCount ? `记录 ${evidenceCount} 条证据` : '',
+      deterministic ? `确定性结果：${deterministic}` : '',
+    ].filter(Boolean);
+    if (parts.length) return parts.join('；');
+  }
+
+  if (code === 'AGENT_PROVENANCE_RECORD') {
+    const kbId = extractValue(raw, 'kbId');
+    const domainCode = extractValue(raw, 'domainCode');
+    const traceId = extractValue(raw, 'traceId');
+    const parts = [
+      kbId ? `知识库 ID：${kbId}` : '',
+      domainCode ? `领域：${domainCode}` : '',
+      traceId ? `Trace ID：${traceId}` : '',
+    ].filter(Boolean);
+    if (parts.length) return `证据来源已记录：${parts.join('，')}。`;
+  }
+
+  return raw;
 }
 
 function resultText(stage: QueryExecutionStage) {
-  const output = stage.outputSummary?.trim();
+  const output = translatedOutput(stage);
   if (output) return output;
-  if (isFailure(stage)) return '本步骤未完成，没有产生可用结果。';
+  if (isFailure(stage)) return '本步骤未完成，没有产生可继续使用的结果。';
   if (statusText(stage) === '进行中') return '本步骤正在执行，结果尚未生成。';
   if (stage.skipped || normalizeCode(stage.status) === 'SKIPPED') {
-    return '本步骤根据执行条件被跳过，没有产生新的业务结果。';
+    return '本步骤按执行条件跳过，没有产生新的结果。';
   }
-  if (normalizeCode(stage.status) === 'CLARIFY') {
-    return '当前信息不足，已形成需要用户补充的信息。';
+  if (normalizeCode(stage.status) === 'EMPTY') {
+    return '本步骤已经正常执行完成，但没有查到符合条件的数据。';
   }
-  return '本步骤已执行完成，后端没有记录单独的结果摘要。';
+  return '本步骤已执行完成。';
 }
 
 function failureReason(stage: QueryExecutionStage) {
   const message = stage.errorMessage?.trim();
+  const output = translatedOutput(stage);
   const code = stage.errorCode?.trim();
-  if (message && code) return `${message}（错误码：${code}）`;
+  if (message && code) return `${message}（原因码：${code}）`;
   if (message) return message;
-  if (code) return `错误码：${code}`;
-  return '后端没有记录具体失败原因。';
-}
-
-function retryGroupKey(stageCode?: null | string) {
-  const code = normalizeCode(stageCode);
-  if (
-    code === 'REPLAN' ||
-    code === 'REPLANNING' ||
-    code === 'RETRY_PLAN' ||
-    code === 'PLAN_RETRY'
-  ) {
-    return 'PLANNER';
+  if (isFailure(stage) && output) {
+    return code ? `${output}（原因码：${code}）` : output;
   }
-  return code;
+  if (code) return `原因码：${code}`;
+  return '后端没有记录更具体的失败原因。';
 }
 
-function isExplicitRetryStage(stageCode?: null | string) {
-  const code = normalizeCode(stageCode);
-  return code.includes('REPLAN') || code.includes('RETRY');
+function planningRound(index: number) {
+  let round = 0;
+  for (let i = 0; i <= index; i += 1) {
+    if (normalizeCode(normalizedStages.value[i]?.stage) === 'AGENT_QUERY_PLANNING') {
+      round += 1;
+    }
+  }
+  return round;
 }
 
 function retryProcess(index: number) {
   const current = normalizedStages.value[index];
   if (!current) return '';
+  const code = normalizeCode(current.stage);
 
-  const key = retryGroupKey(current.stage);
-  if (!key) return '';
+  if (code === 'AGENT_RESULT_EVALUATION' && normalizeCode(current.status) === 'REPLAN') {
+    const nextRound = planningRound(index) + 1;
+    return `第 ${nextRound - 1} 轮执行后的结果仍不足，系统将进行第 ${nextRound - 1} 次重新规划。`;
+  }
 
-  const attempts = normalizedStages.value
-    .map((item, itemIndex) => ({ item, itemIndex }))
-    .filter(({ item }) => retryGroupKey(item.stage) === key);
-
-  if (attempts.length <= 1) return '';
-  if (attempts[attempts.length - 1]?.itemIndex !== index) return '';
-
-  const previousAttempts = attempts.slice(0, -1);
-  const hasPreviousFailure = previousAttempts.some(({ item }) =>
-    isFailure(item),
-  );
-  const hasExplicitRetry = attempts.some(({ item }) =>
-    isExplicitRetryStage(item.stage),
-  );
-
-  if (!hasPreviousFailure && !hasExplicitRetry) return '';
-
-  return attempts
-    .map(({ item }, attemptIndex) => {
-      const round = `第 ${attemptIndex + 1} 次`;
-      if (isFailure(item)) {
-        const reason = item.errorMessage?.trim() || item.errorCode?.trim();
-        return `${round}尝试失败${reason ? `（${reason}）` : ''}`;
+  if (code === 'AGENT_QUERY_PLANNING') {
+    const round = planningRound(index);
+    if (round <= 1) return '';
+    let trigger: QueryExecutionStage | undefined;
+    for (let i = index - 1; i >= 0; i -= 1) {
+      const item = normalizedStages.value[i];
+      const itemStatus = normalizeCode(item?.status);
+      if (itemStatus === 'REPLAN' || itemStatus === 'FAILED') {
+        trigger = item;
+        break;
       }
+      if (normalizeCode(item?.stage) === 'AGENT_QUERY_PLANNING') break;
+    }
+    const reason = trigger ? translatedOutput(trigger) || trigger.errorCode || '' : '';
+    return `第 ${round - 1} 次重新规划已完成${reason ? `；触发原因：${reason}` : ''}。`;
+  }
 
-      if (statusText(item) === '进行中') {
-        return `${round}${attemptIndex > 0 ? '重试' : '尝试'}进行中`;
-      }
-
-      const action =
-        attemptIndex > 0 && key === 'PLANNER' ? '重新规划' : '尝试';
-      return `${round}${action}已完成`;
-    })
-    .join(' → ');
+  return '';
 }
 </script>
 
@@ -320,7 +465,7 @@ function retryProcess(index: number) {
 
       <div v-if="expanded.has(index)" class="qe-stage-body">
         <div v-if="stage.inputSummary" class="qe-block">
-          <div class="qe-label">执行输入摘要</div>
+          <div class="qe-label">后端原始输入摘要</div>
           <pre>{{ stage.inputSummary }}</pre>
         </div>
         <div v-if="stage.outputSummary" class="qe-block qe-output">
@@ -332,8 +477,12 @@ function retryProcess(index: number) {
           <code>{{ stage.modelCallId }}</code>
         </div>
         <div v-if="stage.stage" class="qe-meta">
-          <span>原始阶段标识</span>
+          <span>后端阶段码</span>
           <code>{{ stage.stage }}</code>
+        </div>
+        <div v-if="stage.status" class="qe-meta">
+          <span>后端状态码</span>
+          <code>{{ stage.status }}</code>
         </div>
         <div
           v-if="
