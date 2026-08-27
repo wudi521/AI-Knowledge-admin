@@ -218,7 +218,24 @@ function statusLabel(status?: null | string) {
 }
 
 function stageLabel(stage?: null | string) {
+  const value = stage?.trim().toUpperCase();
   const names: Record<string, string> = {
+    // Agent Runtime 当前真实阶段。这里必须与后端 Trace stage 对齐，不能再统一显示“其他执行阶段”。
+    AGENT_QUERY_PLANNING: '查询规划',
+    AGENT_EXECUTION_PLAN: '生成执行计划',
+    AGENT_PLAN_VALIDATION: '执行计划校验',
+    AGENT_NO_PROGRESS_GUARD: '重复执行保护',
+    AGENT_RUNTIME_EXECUTOR: '执行计划节点',
+    AGENT_RESULT_INTEGRITY: '执行结果完整性校验',
+    AGENT_PROVENANCE_INTEGRITY: '证据来源完整性校验',
+    AGENT_RESULT_EVALUATION: '最终结果评估',
+    AGENT_ANSWER_VALIDATION: '答案校验',
+    AGENT_REFERENCE_RECORD: '引用证据记录',
+    AGENT_PROVENANCE_RECORD: '证据来源记录',
+    AGENT_STOP: '执行结束',
+    AGENT_FALLBACK_TO_V3: '兼容流程降级',
+
+    // 兼容历史 Agent/V3 阶段。
     QUERY_CONTEXT: '查询上下文',
     PLANNER: '任务规划',
     PLAN: '任务规划',
@@ -245,7 +262,6 @@ function stageLabel(stage?: null | string) {
     RETRY_PLAN: '重新规划',
     PLAN_RETRY: '重新规划',
     STOP: '执行结束',
-    AGENT_FALLBACK_TO_V3: '兼容流程降级',
     ANALYZE: '理解问题',
     REWRITE: '查询改写',
     SPLIT: '问题拆解',
@@ -258,7 +274,8 @@ function stageLabel(stage?: null | string) {
     GENERATE: '答案生成',
     VERIFY: '答案校验',
   };
-  return stage ? names[stage] || '其他执行阶段' : '未知阶段';
+  // 后端未来出现新阶段时，至少直接暴露真实阶段码，禁止再退化成没有信息量的兜底文案。
+  return value ? names[value] || value : '未知阶段';
 }
 
 function escapeHtml(text: string) {
